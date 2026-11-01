@@ -42,7 +42,7 @@ export function describeEvent(event: PlanEvent, organizers: PlanOrganizer[]): st
                 .map(([id, n]) => `${formatTablets(n)} ${organizers.find((box) => box.id === id)?.name ?? id}`)
                 .join(' + ');
         case 'pickup':
-            return `${event.packages} package${event.packages === 1 ? '' : 's'}`;
+            return `${event.packages} package${event.packages === 1 ? '' : 's'}${event.needsRenewal ? ', from the new prescription' : ''}`;
         case 'pickup-before-expiry':
             return `${event.packages} package${event.packages === 1 ? '' : 's'}, prescription expires ${event.expiresOn}`;
         case 'contact-doctor':
