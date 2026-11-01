@@ -1,9 +1,6 @@
 /** Parsers for CLI arguments; each throws a message meant for the user. */
 
-/** Today in local time as YYYY-MM-DD. */
-export function today(): string {
-    return new Date().toLocaleDateString('sv-SE');
-}
+export { today } from '@med/core';
 
 export function parseDate(name: string, value: string): string {
     const date = new Date(`${value}T00:00:00Z`);
