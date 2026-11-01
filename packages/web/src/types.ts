@@ -32,6 +32,8 @@ export type OverviewEvent =
           actionDate: string;
           runsOut: string;
           packages?: number;
+          /** A pickup from the new prescription, which has to be renewed first. */
+          needsRenewal?: boolean;
           expiresOn?: string;
       };
 

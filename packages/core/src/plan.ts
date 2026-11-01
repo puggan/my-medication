@@ -82,6 +82,8 @@ export interface PlanEvent {
     refill?: Map<number, Hundredths>;
     /** pickup: packages of the default size. */
     packages?: number;
+    /** pickup: nothing is left to pick up, so it waits for the new prescription. */
+    needsRenewal?: boolean;
     /** pickup-before-expiry and contact-doctor: the prescription concerned. */
     expiresOn?: string;
 }
@@ -290,8 +292,18 @@ class MedicationPlan {
                     });
                 }
                 if (stock.tier2 < total) {
-                    // Nothing left to pick up: a new prescription has to be ready by the pickup warning
+                    // Nothing left to pick up: a new prescription has to be ready by the pickup warning,
+                    // and the pickup still happens then, from the new prescription
                     const expired = stock.lots.find((lot) => lot.expiresOn < date && pickablePackages(lot.tablets, pkg) > 0);
+                    events.push({
+                        action: 'pickup',
+                        medicationId,
+                        medicationName,
+                        actionDate: addDays(date, -pickupWarningDays),
+                        runsOut: runsOut(date, home(), perDay),
+                        packages: Math.ceil((total - stock.tier2) / pkg),
+                        needsRenewal: true,
+                    });
                     events.push({
                         action: 'contact-doctor',
                         medicationId,

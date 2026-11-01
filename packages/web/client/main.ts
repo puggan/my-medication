@@ -300,7 +300,12 @@ function describe(event: OverviewEvent): (Node | string)[] {
                 h('div', { className: 'detail' }, event.items.map((item) => `${item.name} ${fmt(item.tablets)}`).join(', ')),
             ];
         case 'pickup':
-            return [`Pick up ${plural(event.packages ?? 1, 'package')} of ${event.medicationName}`];
+            return [
+                `Pick up ${plural(event.packages ?? 1, 'package')} of ${event.medicationName}`,
+                ...(event.needsRenewal
+                    ? [h('div', { className: 'detail' }, 'From the new prescription, once the doctor has renewed it')]
+                    : []),
+            ];
         case 'pickup-before-expiry':
             return [
                 `Pick up ${plural(event.packages ?? 1, 'package')} of ${event.medicationName}`,

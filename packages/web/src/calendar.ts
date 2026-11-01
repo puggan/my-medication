@@ -68,7 +68,10 @@ function describe(event: OverviewEvent): { summary: string; details: string[] } 
                 details: event.items.map((item) => `${item.name}: ${fmt(item.tablets)}`),
             };
         case 'pickup':
-            return { summary: `Pick up ${event.medicationName} (${plural(event.packages ?? 1, 'package')})`, details: [] };
+            return {
+                summary: `Pick up ${event.medicationName} (${plural(event.packages ?? 1, 'package')})`,
+                details: event.needsRenewal ? ['From the new prescription, once the doctor has renewed it'] : [],
+            };
         case 'pickup-before-expiry':
             return {
                 summary: `Pick up ${event.medicationName} (${plural(event.packages ?? 1, 'package')}) before expiry`,

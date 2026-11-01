@@ -47,6 +47,7 @@ export function overview(input: PlanInput, userName: string): Overview {
                 actionDate: event.actionDate,
                 runsOut: event.runsOut,
                 packages: event.packages,
+                needsRenewal: event.needsRenewal,
                 expiresOn: event.expiresOn,
             });
         }
@@ -64,8 +65,12 @@ export function overview(input: PlanInput, userName: string): Overview {
                 return since === undefined || addDays(since, HIDE_AFTER_DAYS) > input.today;
             })
             .map(({ medication, doses, stock, tier3 }) => ({
+            // A pickup waiting for a new prescription isn't one: the table shows there is none left
             nextPickup: events.find(
-                (e) => e.medicationId === medication.id && (e.action === 'pickup' || e.action === 'pickup-before-expiry'),
+                (e) =>
+                    e.medicationId === medication.id &&
+                    !e.needsRenewal &&
+                    (e.action === 'pickup' || e.action === 'pickup-before-expiry'),
             )?.actionDate,
             nextReorder: events.find((e) => e.medicationId === medication.id && e.action === 'contact-doctor')?.actionDate,
             id: medication.id,
