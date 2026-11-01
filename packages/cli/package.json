@@ -6,6 +6,7 @@
     "med": "./src/main.ts"
   },
   "dependencies": {
+    "@med/core": "workspace:*",
     "@med/db": "workspace:*",
     "drizzle-orm": "0.45.4"
   },
