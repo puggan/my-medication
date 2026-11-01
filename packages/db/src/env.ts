@@ -1,6 +1,9 @@
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-process.loadEnvFile(fileURLToPath(new URL('../../../.env', import.meta.url)));
+// In development the repo's .env; a deployed server gets its variables from systemd instead
+const envFile = fileURLToPath(new URL('../../../.env', import.meta.url));
+if (existsSync(envFile)) process.loadEnvFile(envFile);
 
 function required(name: string): string {
     const value = process.env[name];

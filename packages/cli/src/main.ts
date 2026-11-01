@@ -26,6 +26,7 @@ import {
     setDose,
     updateMedication,
 } from './medication.ts';
+import { approvePasskey, formatCode, listPasskeys, normalizeCode, passkeyState, revokePasskey } from './passkey.ts';
 import { eventTable, stockTable } from './report.ts';
 import { inTransaction } from './transaction.ts';
 
@@ -78,6 +79,12 @@ const USAGE = `Usage:
       opening stock is a negative drop (put -- after the options so a negative count is not read
       as one: drop --date D -- Name 1 -28).
 
+  med passkey list
+  med passkey approve <pairing code> [--user <name>]
+  med passkey revoke <id or pairing code>
+      Passkeys registered on the web wait for approval here. Approving connects one to --user,
+      by default the user named when it was registered.
+
   --user <name> may be left out while there is only one user, and --organizer <name> while the
   medication is only in one organizer.
   --dry-run checks everything, then rolls back instead of saving.`;
@@ -112,6 +119,9 @@ const mark = dryRun ? '○' : '✓';
 const commands: Record<string, { argc: number; run: (db: Db, args: string[]) => Promise<number> }> = {
     stock: { argc: 0, run: runStock },
     events: { argc: 0, run: runEvents },
+    'passkey list': { argc: 0, run: runPasskeyList },
+    'passkey approve': { argc: 1, run: runPasskeyApprove },
+    'passkey revoke': { argc: 1, run: runPasskeyRevoke },
     'organizer list': { argc: 0, run: runOrganizerList },
     'organizer add': { argc: 1, run: runOrganizerAdd },
     'medication list': { argc: 0, run: runMedicationList },
@@ -165,6 +175,39 @@ async function runEvents(db: Db): Promise<number> {
         (event) => event.actionDate <= until || event.action === 'contact-doctor' || event.action === 'pickup-before-expiry',
     );
     for (const line of eventTable(events, input.organizers, input.today)) console.log(line);
+    return 0;
+}
+
+async function runPasskeyList(db: Db): Promise<number> {
+    const keys = await listPasskeys(db);
+    if (keys.length === 0) console.log('No passkeys registered yet');
+    for (const key of keys) {
+        const state = passkeyState(key);
+        const owner = state === 'pending' ? `wants ${key.requestedName}` : `user ${key.userName ?? '?'}`;
+        const used = key.lastUsedAt === null ? 'never used' : `last used ${key.lastUsedAt}`;
+        console.log(
+            `#${key.id}  ${formatCode(key.pairingCode)}  ${state.padEnd(8)}  ${owner}  ${key.label}  ` +
+                `(registered ${key.createdAt}, ${used})`,
+        );
+    }
+    return 0;
+}
+
+async function runPasskeyApprove(db: Db, [code]: string[]): Promise<number> {
+    const { key, owner } = await inTransaction(db, dryRun, async (tx) => {
+        const pending = (await listPasskeys(db)).find(
+            (k) => passkeyState(k) === 'pending' && k.pairingCode === normalizeCode(code!),
+        );
+        const owner = await findUser(tx, values.user ?? pending?.requestedName);
+        return { key: await approvePasskey(tx, code!, owner), owner };
+    });
+    console.log(`${mark} Approved passkey #${key.id} (${key.label}) for ${owner.name}`);
+    return 0;
+}
+
+async function runPasskeyRevoke(db: Db, [idOrCode]: string[]): Promise<number> {
+    const key = await inTransaction(db, dryRun, (tx) => revokePasskey(tx, idOrCode!));
+    console.log(`${mark} Revoked passkey #${key.id} (${key.label})`);
     return 0;
 }
 
