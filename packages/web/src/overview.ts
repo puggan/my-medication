@@ -1,0 +1,70 @@
+import { addDays, plan, type PlanInput } from '@med/core';
+import type { Overview, OverviewEvent } from './types.ts';
+
+export type { Overview, OverviewEvent, OverviewMedication } from './types.ts';
+
+/** How far ahead pickups and refills are listed; doctor contacts and expiries always are. */
+const LIST_DAYS = 60;
+
+const tablets = (hundredths: number) => hundredths / 100;
+
+export function overview(input: PlanInput, userName: string): Overview {
+    const { statuses, events } = plan(input);
+    const until = addDays(input.today, LIST_DAYS);
+    const listed: OverviewEvent[] = [];
+    const refills = new Map<number, Extract<OverviewEvent, { action: 'refill' }>>();
+
+    for (const event of events) {
+        if (event.action === 'refill') {
+            // One row per organizer, as it is filled in one go
+            for (const [organizerId, amount] of event.refill!) {
+                const box = input.organizers.find((o) => o.id === organizerId)!;
+                const row = refills.get(organizerId) ?? {
+                    action: 'refill' as const,
+                    organizerId,
+                    organizerName: box.name,
+                    actionDate: event.actionDate,
+                    runsOut: event.runsOut,
+                    items: [],
+                };
+                if (event.actionDate < row.actionDate) row.actionDate = event.actionDate;
+                const status = statuses.find((s) => s.medication.id === event.medicationId)!;
+                const perDay = status.doses.get(organizerId) ?? 0;
+                if (perDay > 0) {
+                    const emptyOn = addDays(input.today, Math.max(0, Math.floor((status.stock.tier1.get(organizerId) ?? 0) / perDay)) + 1);
+                    if (emptyOn < row.runsOut) row.runsOut = emptyOn;
+                }
+                row.items.push({ medicationId: event.medicationId, name: event.medicationName, tablets: tablets(amount) });
+                refills.set(organizerId, row);
+            }
+        } else if (event.actionDate <= until || event.action === 'contact-doctor' || event.action === 'pickup-before-expiry') {
+            listed.push({
+                action: event.action,
+                medicationId: event.medicationId,
+                medicationName: event.medicationName,
+                actionDate: event.actionDate,
+                runsOut: event.runsOut,
+                packages: event.packages,
+                expiresOn: event.expiresOn,
+            });
+        }
+    }
+    listed.push(...[...refills.values()].filter((row) => row.actionDate <= until));
+    listed.sort((a, b) => a.actionDate.localeCompare(b.actionDate) || (a.action === 'refill' ? -1 : 1));
+
+    return {
+        today: input.today,
+        user: userName,
+        organizers: input.organizers.map(({ id, name }) => ({ id, name })),
+        medications: statuses.map(({ medication, doses, stock, tier3 }) => ({
+            id: medication.id,
+            name: medication.name,
+            packageSize: medication.packageSize,
+            doses: Object.fromEntries([...doses].filter(([, n]) => n > 0).map(([id, n]) => [id, tablets(n)])),
+            tier1: Object.fromEntries([...stock.tier1].map(([id, n]) => [id, tablets(n)])),
+            tier2: tablets(stock.tier2),
+            tier3: tablets(tier3),
+        })),
+        events: listed,
+    };
+}

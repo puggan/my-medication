@@ -1,0 +1,26 @@
+{
+  "name": "@med/web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "dev:client": "vite",
+    "build": "vite build && node build-server.mjs"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.5",
+    "@med/core": "workspace:*",
+    "@med/db": "workspace:*",
+    "@simplewebauthn/browser": "14.0.0",
+    "@simplewebauthn/server": "14.0.3",
+    "drizzle-orm": "0.45.4",
+    "hono": "4.13.13"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "esbuild": "0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "7.0.2",
+    "vite": "8.3.4"
+  }
+}

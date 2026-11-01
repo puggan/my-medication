@@ -6,7 +6,9 @@
   "scripts": {
     "db:generate": "pnpm --filter @med/db generate",
     "db:migrate": "pnpm --filter @med/db migrate",
-    "med": "tsx packages/cli/src/main.ts"
+    "med": "tsx packages/cli/src/main.ts",
+    "web:build": "pnpm --filter @med/web build",
+    "web:dev": "pnpm --filter @med/web dev"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
