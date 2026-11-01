@@ -1,0 +1,121 @@
+:root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --text: #1c2330;
+    --muted: #5f6b7a;
+    --border: #d9dee5;
+    --accent: #2f6fdf;
+    --accent-text: #ffffff;
+    --late: #b3261e;
+    --late-bg: #fdecea;
+    --soon: #8a5a00;
+    --soon-bg: #fff4dc;
+    --ok-bg: #e8f5ec;
+    color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme='light']) {
+        --bg: #12161c;
+        --surface: #1b2129;
+        --text: #e6eaf0;
+        --muted: #9aa6b4;
+        --border: #2e3742;
+        --accent: #6c9cff;
+        --accent-text: #0d1117;
+        --late: #ff8a80;
+        --late-bg: #3a1d1b;
+        --soon: #ffcc66;
+        --soon-bg: #362a12;
+        --ok-bg: #16301f;
+        color-scheme: dark;
+    }
+}
+:root[data-theme='dark'] {
+    --bg: #12161c;
+    --surface: #1b2129;
+    --text: #e6eaf0;
+    --muted: #9aa6b4;
+    --border: #2e3742;
+    --accent: #6c9cff;
+    --accent-text: #0d1117;
+    --late: #ff8a80;
+    --late-bg: #3a1d1b;
+    --soon: #ffcc66;
+    --soon-bg: #362a12;
+    --ok-bg: #16301f;
+    color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+main { max-width: 960px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 1.4rem; margin: 0; }
+h2 { font-size: 1.1rem; margin: 28px 0 8px; }
+.muted { color: var(--muted); }
+.error { color: var(--late); }
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+
+button {
+    font: inherit;
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+}
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+button:disabled { opacity: 0.5; cursor: default; }
+button.link { border: none; background: none; padding: 0; color: var(--accent); text-align: left; }
+
+input, select {
+    font: inherit;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    width: 100%;
+}
+label { display: block; margin: 12px 0 4px; font-weight: 600; }
+
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+.login { max-width: 380px; margin: 12vh auto 0; }
+.login .row { display: flex; gap: 8px; margin-top: 12px; }
+.code { font: 700 2rem/1.2 ui-monospace, monospace; letter-spacing: 0.1em; margin: 12px 0; }
+pre { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; overflow-x: auto; }
+
+.scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+table { border-collapse: collapse; width: 100%; }
+th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+tr:last-child td { border-bottom: none; }
+th { font-size: 0.85rem; color: var(--muted); font-weight: 600; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.wrap { white-space: normal; min-width: 14rem; }
+.detail { color: var(--muted); font-size: 0.9rem; }
+
+.badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.85rem; }
+.late { background: var(--late-bg); color: var(--late); }
+.soon { background: var(--soon-bg); color: var(--soon); }
+.later { background: var(--ok-bg); }
+
+dialog {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--text);
+    width: min(440px, calc(100vw - 32px));
+    padding: 20px;
+}
+dialog::backdrop { background: rgb(0 0 0 / 0.45); }
+dialog h3 { margin: 0 0 8px; }
+dialog ul { padding-left: 1.2rem; }
+.actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; flex-wrap: wrap; }
+.choices { display: flex; gap: 8px; flex-wrap: wrap; }
+.choices label { font-weight: normal; margin: 0; display: flex; gap: 6px; align-items: center; }
+.choices input { width: auto; }

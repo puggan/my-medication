@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
     char,
     check,
+    customType,
     date,
     datetime,
     decimal,
@@ -14,7 +15,6 @@ import {
     smallint,
     tinyint,
     uniqueIndex,
-    varbinary,
     varchar,
 } from 'drizzle-orm/mysql-core';
 
@@ -23,6 +23,11 @@ const tablets = () => decimal({ precision: 8, scale: 2, mode: 'string' });
 const money = () => decimal({ precision: 10, scale: 2, mode: 'string' });
 const day = () => date({ mode: 'string' });
 const timestamp = () => datetime({ mode: 'string' });
+/** Raw bytes; drizzle's own varbinary decodes them as a UTF-8 string, which breaks binary keys. */
+const bytes = customType<{ data: Buffer; driverData: Buffer; config: { length: number } }>({
+    dataType: (config) => `varbinary(${config!.length})`,
+    fromDriver: (value) => Buffer.from(value),
+});
 const createdAt = () => timestamp().notNull().default(sql`CURRENT_TIMESTAMP`);
 
 /**
@@ -197,8 +202,8 @@ export const passkey = mysqlTable(
         id: int({ unsigned: true }).autoincrement().primaryKey(),
         userId: int({ unsigned: true }),
         requestedName: varchar({ length: 64 }).notNull(),
-        credentialId: varbinary({ length: 1023 }).notNull(),
-        publicKey: varbinary({ length: 1023 }).notNull(),
+        credentialId: bytes({ length: 1023 }).notNull(),
+        publicKey: bytes({ length: 1023 }).notNull(),
         signCount: int({ unsigned: true }).notNull().default(0),
         transports: json().$type<string[]>(),
         label: varchar({ length: 255 }).notNull(),
