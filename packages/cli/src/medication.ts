@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, lte } from 'drizzle-orm';
-import { dose, medication, organizer, transfer, user, type Db, type Medication, type Organizer, type Tx, type User } from '@med/db';
+import { dose, medication, organizer, user, type Db, type Medication, type Organizer, type Tx, type User } from '@med/db';
 
 /** The named user, or the only one when no name is given. */
 export async function findUser(db: Db | Tx, name: string | undefined): Promise<User> {
@@ -18,6 +18,23 @@ export async function findOrganizer(db: Db | Tx, owner: User, name: string | und
     if (organizers.length === 1) return organizers[0]!;
     if (name !== undefined) throw new Error(`${owner.name} has no organizer named "${name}"`);
     throw new Error(`${owner.name} has ${organizers.length} organizers, choose one with --organizer`);
+}
+
+/** The named organizer, or when no name is given the only one med has a dose in. */
+export async function findOrganizerFor(
+    db: Db | Tx,
+    owner: User,
+    med: Medication,
+    name: string | undefined,
+): Promise<Organizer> {
+    if (name !== undefined) return findOrganizer(db, owner, name);
+    const used = await db
+        .selectDistinct({ organizer })
+        .from(dose)
+        .innerJoin(organizer, eq(organizer.id, dose.organizerId))
+        .where(eq(dose.medicationId, med.id));
+    if (used.length === 1) return used[0]!.organizer;
+    throw new Error(`${med.name} is in ${used.length} organizers, choose one with --organizer`);
 }
 
 export async function listOrganizers(db: Db, owner: User): Promise<Organizer[]> {
@@ -104,48 +121,4 @@ export async function dosesOn(db: Db | Tx, med: Medication, date: string): Promi
 export async function listMedications(db: Db, owner: User, date: string) {
     const meds = await db.select().from(medication).where(eq(medication.userId, owner.id)).orderBy(asc(medication.name));
     return Promise.all(meds.map(async (med) => ({ med, doses: await dosesOn(db, med, date) })));
-}
-
-/**
- * Tablets leaving tier outside of the normal flow, to match a count; negative tablets were found.
- * Opening stock is recorded as a negative drop.
- */
-export async function addDrop(
-    tx: Tx,
-    owner: User,
-    med: Medication,
-    values: { tier: 1 | 2 | 3; organizer?: Organizer; tablets: string; date: string; note?: string },
-): Promise<void> {
-    if (Number(values.tablets) === 0) throw new Error('A drop of 0 tablets changes nothing');
-    if ((values.tier === 1) !== (values.organizer !== undefined)) throw new Error('Only tier 1 drops name an organizer');
-    await tx.insert(transfer).values({
-        medicationId: med.id,
-        kind: 'drop',
-        tier: values.tier,
-        organizerId: values.organizer?.id,
-        tablets: values.tablets,
-        date: values.date,
-        note: values.note,
-        createdBy: owner.id,
-    });
-}
-
-/** A prescription adding tablets to tier 3, usable until expiresOn. */
-export async function addRenew(
-    tx: Tx,
-    owner: User,
-    med: Medication,
-    values: { tablets: string; date: string; expiresOn: string; note?: string },
-): Promise<void> {
-    if (Number(values.tablets) === 0) throw new Error('A prescription of 0 tablets changes nothing');
-    if (values.expiresOn < values.date) throw new Error(`The prescription expires ${values.expiresOn}, before ${values.date}`);
-    await tx.insert(transfer).values({
-        medicationId: med.id,
-        kind: 'renew',
-        tablets: values.tablets,
-        date: values.date,
-        expiresOn: values.expiresOn,
-        note: values.note,
-        createdBy: owner.id,
-    });
 }
