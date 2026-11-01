@@ -33,20 +33,21 @@ export const tiers = [1, 2, 3] as const;
 export type Tier = (typeof tiers)[number];
 
 /**
- * Person whose medications are tracked, and who logs in on the web. The refill cycle is the
- * organizers' schedule: they are refilled every refillIntervalDays from refillAnchor.
+ * Person whose medications are tracked, and who logs in on the web. The pill organizers hold
+ * organizerDays in all, one week per organizer, and are refilled on refillWeekday (0 = Sunday)
+ * once a week's room is free, so tier 1 should never run below a week.
  */
 export const user = mysqlTable('user', {
     id: int({ unsigned: true }).autoincrement().primaryKey(),
     name: varchar({ length: 64 }).notNull().unique('user_name'),
-    refillAnchor: day().notNull(),
-    refillIntervalDays: tinyint({ unsigned: true }).notNull().default(14),
+    refillWeekday: tinyint({ unsigned: true }).notNull().default(0),
+    organizerDays: tinyint({ unsigned: true }).notNull().default(14),
     /** How long before a refill a short cupboard is warned about (Sunday refill, Wednesday warning). */
     pickupWarningDays: tinyint({ unsigned: true }).notNull().default(4),
     /** How long renewing a prescription can take, from contacting the doctor until pickup. */
     renewalLeadDays: tinyint({ unsigned: true }).notNull().default(30),
     createdAt: createdAt(),
-});
+}, () => [check('user_refill_weekday', sql`refill_weekday BETWEEN 0 AND 6`)]);
 
 /**
  * packageSize and packagePrice are the usual package; actual pickups record what they got and paid.
