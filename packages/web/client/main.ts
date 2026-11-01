@@ -423,6 +423,14 @@ function numberInput(id: string, value: string, attrs: Record<string, string> = 
 function pickupDialog(med: OverviewMedication): void {
     const size = numberInput('pickup-size', String(med.packageSize));
     const packages = numberInput('pickup-packages', '1');
+    const price = h('input', {
+        id: 'pickup-price',
+        type: 'number',
+        inputmode: 'decimal',
+        min: '0',
+        step: '0.01',
+        placeholder: 'From the receipt, if you have it',
+    });
     const total = h('p', { className: 'muted' });
     const update = () => {
         total.textContent = `${Number(packages.value) * Number(size.value) || 0} tablets move from the pharmacy (tier 3) to the cupboard (tier 2).`;
@@ -433,7 +441,12 @@ function pickupDialog(med: OverviewMedication): void {
     const status = h('p', {});
     const confirm = h('button', { className: 'primary' }, 'Confirm pickup');
     confirm.addEventListener('click', async () => {
-        const body = { medicationId: med.id, packages: Number(packages.value), packageSize: Number(size.value) };
+        const body = {
+            medicationId: med.id,
+            packages: Number(packages.value),
+            packageSize: Number(size.value),
+            pricePerPackage: price.value === '' ? undefined : Number(price.value),
+        };
         if (await submit(status, [confirm], () => post('/api/pickup', body))) closeDialog();
     });
     openDialog(
@@ -442,6 +455,8 @@ function pickupDialog(med: OverviewMedication): void {
         size,
         h('label', { for: 'pickup-packages' }, 'Packages'),
         packages,
+        h('label', { for: 'pickup-price' }, 'Price per package (SEK)'),
+        price,
         total,
         status,
         h('div', { className: 'actions' }, cancelButton(), confirm),

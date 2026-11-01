@@ -9,6 +9,7 @@ import {
     recordCount,
     recordDrop,
     recordPickup,
+    recordPrice,
     recordRefill,
     recordRenew,
 } from '@med/core';
@@ -37,6 +38,7 @@ import {
     passkeyState,
     revokePasskey,
 } from './passkey.ts';
+import { listPrices } from './price.ts';
 import { eventTable, stockTable } from './report.ts';
 import { inTransaction } from './transaction.ts';
 
@@ -57,11 +59,11 @@ const USAGE = `Usage:
   med medication list [--date YYYY-MM-DD]
       List medications with the dose per organizer in effect on --date (default today).
 
-  med medication add <name> --per-day <tablets> --package-size <tablets> [--price <kr>] [--from YYYY-MM-DD]
+  med medication add <name> --per-day <tablets> --package-size <tablets> [--from YYYY-MM-DD]
       Add a medication with its first dose in --organizer, starting --from (default today).
 
-  med medication set <name> [--package-size <tablets>] [--price <kr>]
-      Change the default package size or price.
+  med medication set <name> --package-size <tablets>
+      Change the default package size.
 
   med dose set <name> <tablets per day> [--from YYYY-MM-DD]
       Change the dose in --organizer from --from (default today) on. 0 ends the medication there;
@@ -72,8 +74,13 @@ const USAGE = `Usage:
       every organizer or only --organizer, with the amounts med events suggests. --tablets with a
       <name> records one other amount instead.
 
-  med pickup <name> [--packages 1] [--package-size <tablets>] [--price <kr>] [--date YYYY-MM-DD]
-      Packages picked up at the pharmacy; the package size defaults to the medication's.
+  med pickup <name> [--packages 1] [--package-size <tablets>] [--price <kr per package>] [--date YYYY-MM-DD]
+      Packages picked up at the pharmacy; the package size defaults to the medication's. --price
+      also adds the price per package to the price history.
+
+  med price list [<name>]
+  med price add <name> <kr per package> [--package-size <tablets>] [--date YYYY-MM-DD]
+      Price history in SEK, e.g. from receipts of pickups made before tracking started.
 
   med renew <name> <tablets> --expires YYYY-MM-DD [--package-size <tablets>] [--date YYYY-MM-DD] [--note <text>]
       A prescription adding tablets to tier 3 on --date (default today), usable until --expires.
@@ -153,6 +160,8 @@ const commands: Record<string, { argc: number; run: (db: Db, args: string[]) => 
     refill: { argc: -1, run: runRefill },
     pickup: { argc: 1, run: runPickup },
     renew: { argc: 2, run: runRenew },
+    'price list': { argc: -1, run: runPriceList },
+    'price add': { argc: 2, run: runPriceAdd },
     count: { argc: 3, run: runCount },
     drop: { argc: 3, run: runDrop },
 };
@@ -284,14 +293,11 @@ async function runMedicationList(db: Db): Promise<number> {
     const rows = await listMedications(db, owner, date);
     const width = Math.max(4, ...rows.map(({ med }) => med.name.length));
     const boxWidths = organizers.map((box) => Math.max(7, box.name.length));
-    console.log(
-        `${'Name'.padEnd(width)}  ${organizers.map((box, i) => box.name.padStart(boxWidths[i]!)).join('  ')}  Package     Price`,
-    );
+    console.log(`${'Name'.padEnd(width)}  ${organizers.map((box, i) => box.name.padStart(boxWidths[i]!)).join('  ')}  Package`);
     for (const { med, doses } of rows) {
         const perBox = organizers.map((box, i) => (doses.get(box.id) ?? '-').padStart(boxWidths[i]!));
         console.log(
-            `${med.name.padEnd(width)}  ${perBox.join('  ')}  ${String(med.packageSize).padStart(7)}  ` +
-                `${(med.packagePrice ?? '-').padStart(8)}`,
+            `${med.name.padEnd(width)}  ${perBox.join('  ')}  ${String(med.packageSize).padStart(7)}`,
         );
     }
     return 0;
@@ -305,7 +311,6 @@ async function runMedicationAdd(db: Db, [name]: string[]): Promise<number> {
         name: name!,
         perDay: parseTablets('--per-day', values['per-day']),
         packageSize: parsePositiveInt('--package-size', values['package-size']),
-        packagePrice: values.price === undefined ? undefined : parseMoney('--price', values.price),
         from: values.from === undefined ? today() : parseDate('--from', values.from),
     };
     const box = await inTransaction(db, dryRun, async (tx) => {
@@ -321,18 +326,12 @@ async function runMedicationAdd(db: Db, [name]: string[]): Promise<number> {
 }
 
 async function runMedicationSet(db: Db, [name]: string[]): Promise<number> {
-    const input = {
-        packageSize: values['package-size'] === undefined ? undefined : parsePositiveInt('--package-size', values['package-size']),
-        packagePrice: values.price === undefined ? undefined : parseMoney('--price', values.price),
-    };
+    const packageSize =
+        values['package-size'] === undefined ? undefined : parsePositiveInt('--package-size', values['package-size']);
     await inTransaction(db, dryRun, async (tx) => {
-        await updateMedication(tx, await findMedication(tx, await findUser(tx, values.user), name!), input);
+        await updateMedication(tx, await findMedication(tx, await findUser(tx, values.user), name!), { packageSize });
     });
-    const changes = [
-        input.packageSize === undefined ? undefined : `package of ${input.packageSize}`,
-        input.packagePrice === undefined ? undefined : `price ${input.packagePrice}`,
-    ].filter((change) => change !== undefined);
-    console.log(`${mark} ${name}: ${changes.join(', ')}`);
+    console.log(`${mark} ${name}: package of ${packageSize}`);
     return 0;
 }
 
@@ -393,16 +392,46 @@ async function runRefill(db: Db, [name]: string[]): Promise<number> {
 async function runPickup(db: Db, [name]: string[]): Promise<number> {
     const date = values.date === undefined ? today() : parseDate('--date', values.date);
     const packages = parsePositiveInt('--packages', values.packages);
-    const price = values.price === undefined ? undefined : parseMoney('--price', values.price);
+    const pricePerPackage = values.price === undefined ? undefined : parseMoney('--price', values.price);
     const size = await inTransaction(db, dryRun, async (tx) => {
         const owner = await findUser(tx, values.user);
         const med = await findMedication(tx, owner, name!);
         const packageSize =
             values['package-size'] === undefined ? med.packageSize : parsePositiveInt('--package-size', values['package-size']);
-        await recordPickup(tx, owner, med, { packages, packageSize, price, date, note: values.note });
+        await recordPickup(tx, owner, med, { packages, packageSize, pricePerPackage, date, note: values.note });
         return packageSize;
     });
-    console.log(`${mark} ${name}: picked up ${packages} × ${size} = ${packages * size} tablets on ${date}`);
+    const paid = pricePerPackage === undefined ? '' : `, ${pricePerPackage} SEK per package`;
+    console.log(`${mark} ${name}: picked up ${packages} × ${size} = ${packages * size} tablets on ${date}${paid}`);
+    return 0;
+}
+
+async function runPriceList(db: Db, [name]: string[]): Promise<number> {
+    const prices = await listPrices(db, await findUser(db, values.user), name);
+    if (prices.length === 0) console.log(name === undefined ? 'No prices recorded yet' : `No prices recorded for ${name}`);
+    for (const row of prices) {
+        const perTablet = (Number(row.pricePerPackage) / row.packageSize).toFixed(2);
+        const source = row.transferId === null ? '' : `  (pickup #${row.transferId})`;
+        console.log(
+            `${row.date}  ${row.name.padEnd(14)}  ${row.pricePerPackage.padStart(9)} ${row.currency} / ${row.packageSize}` +
+                `  = ${perTablet} per tablet${source}`,
+        );
+    }
+    return 0;
+}
+
+async function runPriceAdd(db: Db, [name, amount]: string[]): Promise<number> {
+    const pricePerPackage = parseMoney('price', amount!);
+    const date = values.date === undefined ? today() : parseDate('--date', values.date);
+    const size = await inTransaction(db, dryRun, async (tx) => {
+        const owner = await findUser(tx, values.user);
+        const med = await findMedication(tx, owner, name!);
+        const packageSize =
+            values['package-size'] === undefined ? med.packageSize : parsePositiveInt('--package-size', values['package-size']);
+        await recordPrice(tx, owner, med, { packageSize, pricePerPackage, date });
+        return packageSize;
+    });
+    console.log(`${mark} ${name}: ${pricePerPackage} SEK per package of ${size} on ${date}`);
     return 0;
 }
 
