@@ -20,6 +20,7 @@ import {
 
 /** Tablet count; two decimals so half and quarter tablets fit. */
 const tablets = () => decimal({ precision: 8, scale: 2, mode: 'string' });
+const money = () => decimal({ precision: 10, scale: 2, mode: 'string' });
 const day = () => date({ mode: 'string' });
 const timestamp = () => datetime({ mode: 'string' });
 const createdAt = () => timestamp().notNull().default(sql`CURRENT_TIMESTAMP`);
@@ -47,7 +48,10 @@ export const user = mysqlTable('user', {
     createdAt: createdAt(),
 });
 
-/** packageSize is the usual tablets per package; actual pickups record what they got. */
+/**
+ * packageSize and packagePrice are the usual package; actual pickups record what they got and paid.
+ * The yearly cost is calculated from the dose, never stored.
+ */
 export const medication = mysqlTable(
     'medication',
     {
@@ -55,6 +59,7 @@ export const medication = mysqlTable(
         userId: int({ unsigned: true }).notNull(),
         name: varchar({ length: 128 }).notNull(),
         packageSize: smallint({ unsigned: true }).notNull(),
+        packagePrice: money(),
         createdAt: createdAt(),
     },
     (t) => [
@@ -83,8 +88,9 @@ export const dose = mysqlTable(
 
 /**
  * Confirmed movement of tablets, dated at the end of the day it happened:
- * - renew: a new prescription adds to tier 3
- * - pickup: tier 3 to 2, packages of packageSize as bought (brands differ)
+ * - renew: a new prescription adds to tier 3, usable until expiresOn
+ * - pickup: tier 3 to 2, packages of packageSize as bought (brands differ), taken from the
+ *   prescription that expires first
  * - refill: tier 2 to 1
  * - drop: tablets leave tier (lost, broken, expired) to match a count; negative when found
  * The daily drain of tier 1 is calculated from dose, never stored.
@@ -104,6 +110,10 @@ export const transfer = mysqlTable(
         tier: tinyint({ unsigned: true }),
         packages: smallint({ unsigned: true }),
         packageSize: smallint({ unsigned: true }),
+        /** Total paid for a pickup. */
+        price: money(),
+        /** Only for renew: the last day the prescription can be picked up. */
+        expiresOn: day(),
         note: varchar({ length: 255 }),
         createdBy: int({ unsigned: true }).notNull(),
         createdAt: createdAt(),
@@ -115,6 +125,8 @@ export const transfer = mysqlTable(
         foreignKey({ name: 'transfer_created_by', columns: [t.createdBy], foreignColumns: [user.id] }),
         check('transfer_drop_tier', sql`(kind = 'drop') = (tier IS NOT NULL) AND (tier IS NULL OR tier BETWEEN 1 AND 3)`),
         check('transfer_tablets', sql`kind = 'drop' OR tablets > 0`),
+        check('transfer_expires', sql`(kind = 'renew') = (expires_on IS NOT NULL)`),
+        check('transfer_price', sql`price IS NULL OR kind = 'pickup'`),
         check('transfer_packages', sql`(packages IS NULL) = (package_size IS NULL) AND (packages IS NULL OR kind = 'pickup')`),
     ],
 );
