@@ -1,0 +1,16 @@
+{
+  "name": "@med/cli",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "med": "./src/main.ts"
+  },
+  "dependencies": {
+    "@med/db": "workspace:*",
+    "drizzle-orm": "0.45.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "7.0.2"
+  }
+}

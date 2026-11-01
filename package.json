@@ -1,0 +1,19 @@
+{
+  "name": "med",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.8",
+  "scripts": {
+    "db:generate": "pnpm --filter @med/db generate",
+    "db:migrate": "pnpm --filter @med/db migrate",
+    "med": "tsx packages/cli/src/main.ts"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
+  "devDependencies": {
+    "tsx": "4.23.15"
+  }
+}
