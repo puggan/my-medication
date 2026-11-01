@@ -15,6 +15,20 @@
       "when": 1793533535705,
       "tag": "0001_expiry_and_price",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1793533747446,
+      "tag": "0002_drop_refill_anchor",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1793533749122,
+      "tag": "0003_refill_weekday",
+      "breakpoints": true
     }
   ]
 }
