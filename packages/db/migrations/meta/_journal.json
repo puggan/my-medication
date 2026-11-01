@@ -29,6 +29,13 @@
       "when": 1793533749122,
       "tag": "0003_refill_weekday",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1793534275540,
+      "tag": "0004_organizers",
+      "breakpoints": true
     }
   ]
 }

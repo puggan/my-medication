@@ -27,27 +27,44 @@ const createdAt = () => timestamp().notNull().default(sql`CURRENT_TIMESTAMP`);
 
 /**
  * Tiers stock moves through: 3 is what the pharmacy still holds on the prescription, 2 the
- * cupboard at home, 1 the weekly pill organizers that drain by the dose every day.
+ * cupboard at home, 1 the pill organizers that drain by the dose every day. Tier 1 is kept per
+ * organizer, all of them filled from the same tier 2 stock.
  */
 export const tiers = [1, 2, 3] as const;
 export type Tier = (typeof tiers)[number];
 
-/**
- * Person whose medications are tracked, and who logs in on the web. The pill organizers hold
- * organizerDays in all, one week per organizer, and are refilled on refillWeekday (0 = Sunday)
- * once a week's room is free, so tier 1 should never run below a week.
- */
+/** Person whose medications are tracked, and who logs in on the web. Organizers are refilled on refillWeekday (0 = Sunday). */
 export const user = mysqlTable('user', {
     id: int({ unsigned: true }).autoincrement().primaryKey(),
     name: varchar({ length: 64 }).notNull().unique('user_name'),
     refillWeekday: tinyint({ unsigned: true }).notNull().default(0),
-    organizerDays: tinyint({ unsigned: true }).notNull().default(14),
     /** How long before a refill a short cupboard is warned about (Sunday refill, Wednesday warning). */
     pickupWarningDays: tinyint({ unsigned: true }).notNull().default(4),
     /** How long renewing a prescription can take, from contacting the doctor until pickup. */
     renewalLeadDays: tinyint({ unsigned: true }).notNull().default(30),
     createdAt: createdAt(),
 }, () => [check('user_refill_weekday', sql`refill_weekday BETWEEN 0 AND 6`)]);
+
+/**
+ * Set of pill organizers for one time of day, e.g. two weekly morning containers. It holds
+ * containers × containerDays and is refilled once a container is empty, back up to full.
+ */
+export const organizer = mysqlTable(
+    'organizer',
+    {
+        id: int({ unsigned: true }).autoincrement().primaryKey(),
+        userId: int({ unsigned: true }).notNull(),
+        name: varchar({ length: 32 }).notNull(),
+        containers: tinyint({ unsigned: true }).notNull().default(1),
+        containerDays: tinyint({ unsigned: true }).notNull().default(7),
+        createdAt: createdAt(),
+    },
+    (t) => [
+        uniqueIndex('organizer_user_name').on(t.userId, t.name),
+        foreignKey({ name: 'organizer_user', columns: [t.userId], foreignColumns: [user.id] }),
+        check('organizer_size', sql`containers > 0 AND container_days > 0`),
+    ],
+);
 
 /**
  * packageSize and packagePrice are the usual package; actual pickups record what they got and paid.
@@ -70,19 +87,24 @@ export const medication = mysqlTable(
     ],
 );
 
-/** Daily dose from startDate until the next row; 0 means the medication is no longer taken. */
+/**
+ * Daily dose put in one organizer, from startDate until the next row for the same organizer;
+ * 0 ends it there. A medication taken morning and evening has rows for both organizers.
+ */
 export const dose = mysqlTable(
     'dose',
     {
         id: int({ unsigned: true }).autoincrement().primaryKey(),
         medicationId: int({ unsigned: true }).notNull(),
+        organizerId: int({ unsigned: true }).notNull(),
         startDate: day().notNull(),
         perDay: tablets().notNull(),
         createdAt: createdAt(),
     },
     (t) => [
-        uniqueIndex('dose_medication_start').on(t.medicationId, t.startDate),
+        uniqueIndex('dose_medication_organizer_start').on(t.medicationId, t.organizerId, t.startDate),
         foreignKey({ name: 'dose_medication', columns: [t.medicationId], foreignColumns: [medication.id] }),
+        foreignKey({ name: 'dose_organizer', columns: [t.organizerId], foreignColumns: [organizer.id] }),
         check('dose_per_day', sql`per_day >= 0`),
     ],
 );
@@ -92,8 +114,9 @@ export const dose = mysqlTable(
  * - renew: a new prescription adds to tier 3, usable until expiresOn
  * - pickup: tier 3 to 2, packages of packageSize as bought (brands differ), taken from the
  *   prescription that expires first
- * - refill: tier 2 to 1
- * - drop: tablets leave tier (lost, broken, expired) to match a count; negative when found
+ * - refill: tier 2 to 1, into organizerId
+ * - drop: tablets leave tier (lost, broken, expired) to match a count; negative when found.
+ *   A tier 1 drop names the organizer.
  * The daily drain of tier 1 is calculated from dose, never stored.
  */
 export const transferKinds = ['renew', 'pickup', 'refill', 'drop'] as const;
@@ -109,6 +132,8 @@ export const transfer = mysqlTable(
         tablets: tablets().notNull(),
         /** Only for drop: the tier the tablets left. */
         tier: tinyint({ unsigned: true }),
+        /** The organizer of a refill, or of a tier 1 drop. */
+        organizerId: int({ unsigned: true }),
         packages: smallint({ unsigned: true }),
         packageSize: smallint({ unsigned: true }),
         /** Total paid for a pickup. */
@@ -123,9 +148,11 @@ export const transfer = mysqlTable(
     (t) => [
         index('transfer_medication_date').on(t.medicationId, t.date),
         foreignKey({ name: 'transfer_medication', columns: [t.medicationId], foreignColumns: [medication.id] }),
+        foreignKey({ name: 'transfer_organizer', columns: [t.organizerId], foreignColumns: [organizer.id] }),
         foreignKey({ name: 'transfer_created_by', columns: [t.createdBy], foreignColumns: [user.id] }),
         check('transfer_drop_tier', sql`(kind = 'drop') = (tier IS NOT NULL) AND (tier IS NULL OR tier BETWEEN 1 AND 3)`),
         check('transfer_tablets', sql`kind = 'drop' OR tablets > 0`),
+        check('transfer_organizer_tier', sql`(organizer_id IS NOT NULL) = (kind = 'refill' OR tier = 1)`),
         check('transfer_expires', sql`(kind = 'renew') = (expires_on IS NOT NULL)`),
         check('transfer_price', sql`price IS NULL OR kind = 'pickup'`),
         check('transfer_packages', sql`(packages IS NULL) = (package_size IS NULL) AND (packages IS NULL OR kind = 'pickup')`),
@@ -142,6 +169,8 @@ export const stockCount = mysqlTable(
         id: int({ unsigned: true }).autoincrement().primaryKey(),
         medicationId: int({ unsigned: true }).notNull(),
         tier: tinyint({ unsigned: true }).notNull(),
+        /** Set exactly for tier 1 counts. */
+        organizerId: int({ unsigned: true }),
         countedOn: day().notNull(),
         tablets: tablets().notNull(),
         createdBy: int({ unsigned: true }).notNull(),
@@ -150,8 +179,9 @@ export const stockCount = mysqlTable(
     (t) => [
         index('stock_count_medication_date').on(t.medicationId, t.countedOn),
         foreignKey({ name: 'stock_count_medication', columns: [t.medicationId], foreignColumns: [medication.id] }),
+        foreignKey({ name: 'stock_count_organizer', columns: [t.organizerId], foreignColumns: [organizer.id] }),
         foreignKey({ name: 'stock_count_created_by', columns: [t.createdBy], foreignColumns: [user.id] }),
-        check('stock_count_tier', sql`tier BETWEEN 1 AND 3`),
+        check('stock_count_tier', sql`tier BETWEEN 1 AND 3 AND (tier = 1) = (organizer_id IS NOT NULL)`),
         check('stock_count_tablets', sql`tablets >= 0`),
     ],
 );
@@ -185,6 +215,7 @@ export const passkey = mysqlTable(
 );
 
 export type User = typeof user.$inferSelect;
+export type Organizer = typeof organizer.$inferSelect;
 export type Medication = typeof medication.$inferSelect;
 export type Dose = typeof dose.$inferSelect;
 export type Transfer = typeof transfer.$inferSelect;
