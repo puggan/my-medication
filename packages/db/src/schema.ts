@@ -206,7 +206,10 @@ export const passkey = mysqlTable(
         publicKey: bytes({ length: 1023 }).notNull(),
         signCount: int({ unsigned: true }).notNull().default(0),
         transports: json().$type<string[]>(),
+        /** Browser and OS from the User-Agent at registration. */
         label: varchar({ length: 255 }).notNull(),
+        /** Set from the CLI, to tell apart devices with the same label. */
+        name: varchar({ length: 64 }),
         pairingCode: char({ length: 6 }).notNull(),
         createdAt: createdAt(),
         approvedAt: timestamp(),

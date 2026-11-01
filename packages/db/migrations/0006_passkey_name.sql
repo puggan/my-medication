@@ -1,0 +1,1 @@
+ALTER TABLE `passkey` ADD `name` varchar(64);

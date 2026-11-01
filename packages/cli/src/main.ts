@@ -26,7 +26,16 @@ import {
     setDose,
     updateMedication,
 } from './medication.ts';
-import { approvePasskey, formatCode, listPasskeys, normalizeCode, passkeyState, revokePasskey } from './passkey.ts';
+import {
+    approvePasskey,
+    describePasskey,
+    formatCode,
+    listPasskeys,
+    namePasskey,
+    normalizeCode,
+    passkeyState,
+    revokePasskey,
+} from './passkey.ts';
 import { eventTable, stockTable } from './report.ts';
 import { inTransaction } from './transaction.ts';
 
@@ -80,10 +89,12 @@ const USAGE = `Usage:
       as one: drop --date D -- Name 1 -28).
 
   med passkey list
-  med passkey approve <pairing code> [--user <name>]
+  med passkey approve <pairing code> [--user <name>] [--name <device name>]
+  med passkey name <id or pairing code> <device name>
   med passkey revoke <id or pairing code>
       Passkeys registered on the web wait for approval here. Approving connects one to --user,
-      by default the user named when it was registered.
+      by default the user named when it was registered. A name tells apart devices that look the
+      same; an empty name ("") removes it.
 
   --user <name> may be left out while there is only one user, and --organizer <name> while the
   medication is only in one organizer.
@@ -94,6 +105,7 @@ const { positionals, values } = parseArgs({
     allowNegative: false,
     options: {
         user: { type: 'string' },
+        name: { type: 'string' },
         organizer: { type: 'string' },
         containers: { type: 'string' },
         'container-days': { type: 'string', default: '7' },
@@ -121,6 +133,7 @@ const commands: Record<string, { argc: number; run: (db: Db, args: string[]) => 
     events: { argc: 0, run: runEvents },
     'passkey list': { argc: 0, run: runPasskeyList },
     'passkey approve': { argc: 1, run: runPasskeyApprove },
+    'passkey name': { argc: 2, run: runPasskeyName },
     'passkey revoke': { argc: 1, run: runPasskeyRevoke },
     'organizer list': { argc: 0, run: runOrganizerList },
     'organizer add': { argc: 1, run: runOrganizerAdd },
@@ -186,7 +199,7 @@ async function runPasskeyList(db: Db): Promise<number> {
         const owner = state === 'pending' ? `wants ${key.requestedName}` : `user ${key.userName ?? '?'}`;
         const used = key.lastUsedAt === null ? 'never used' : `last used ${key.lastUsedAt}`;
         console.log(
-            `#${key.id}  ${formatCode(key.pairingCode)}  ${state.padEnd(8)}  ${owner}  ${key.label}  ` +
+            `#${key.id}  ${formatCode(key.pairingCode)}  ${state.padEnd(8)}  ${owner}  ${describePasskey(key)}  ` +
                 `(registered ${key.createdAt}, ${used})`,
         );
     }
@@ -199,15 +212,23 @@ async function runPasskeyApprove(db: Db, [code]: string[]): Promise<number> {
             (k) => passkeyState(k) === 'pending' && k.pairingCode === normalizeCode(code!),
         );
         const owner = await findUser(tx, values.user ?? pending?.requestedName);
-        return { key: await approvePasskey(tx, code!, owner), owner };
+        return { key: await approvePasskey(tx, code!, owner, values.name), owner };
     });
-    console.log(`${mark} Approved passkey #${key.id} (${key.label}) for ${owner.name}`);
+    const named = values.name === undefined ? key.label : `${values.name} (${key.label})`;
+    console.log(`${mark} Approved passkey #${key.id}, ${named}, for ${owner.name}`);
+    return 0;
+}
+
+async function runPasskeyName(db: Db, [idOrCode, name]: string[]): Promise<number> {
+    const key = await inTransaction(db, dryRun, (tx) => namePasskey(tx, idOrCode!, name!));
+    const what = name!.trim() === '' ? 'name removed' : `named "${name!.trim()}"`;
+    console.log(`${mark} Passkey #${key.id} (${key.label}) ${what}`);
     return 0;
 }
 
 async function runPasskeyRevoke(db: Db, [idOrCode]: string[]): Promise<number> {
     const key = await inTransaction(db, dryRun, (tx) => revokePasskey(tx, idOrCode!));
-    console.log(`${mark} Revoked passkey #${key.id} (${key.label})`);
+    console.log(`${mark} Revoked passkey #${key.id}, ${describePasskey(key)}`);
     return 0;
 }
 

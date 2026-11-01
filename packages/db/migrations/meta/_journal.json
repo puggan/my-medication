@@ -43,6 +43,13 @@
       "when": 1793538021469,
       "tag": "0005_passkey_requested_name",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1793539084565,
+      "tag": "0006_passkey_name",
+      "breakpoints": true
     }
   ]
 }
