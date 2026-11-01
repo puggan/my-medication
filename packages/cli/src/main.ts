@@ -1,5 +1,6 @@
 #!/usr/bin/env -S node --import tsx
 import { parseArgs } from 'node:util';
+import { addDays, loadPlanInput, plan } from '@med/core';
 import { connectVerified, type Db } from '@med/db';
 import { parseDate, parseMoney, parsePositiveInt, parseTablets, parseTier, today } from './input.ts';
 import {
@@ -15,9 +16,17 @@ import {
     setDose,
     updateMedication,
 } from './medication.ts';
+import { eventTable, stockTable } from './report.ts';
 import { inTransaction } from './transaction.ts';
 
 const USAGE = `Usage:
+  med stock [--date YYYY-MM-DD]
+      Dose and stock per tier at the end of --date (default today).
+
+  med events [--days 60] [--date YYYY-MM-DD]
+      Actions due within --days of --date (default today): the next refill per medication, pickups,
+      and every doctor contact and expiry however far ahead.
+
   med organizer list
   med organizer add <name> --containers <n> [--container-days 7]
       Pill organizers for one time of day, e.g. "morning" with 2 weekly containers. Each is
@@ -63,6 +72,7 @@ const { positionals, values } = parseArgs({
         price: { type: 'string' },
         note: { type: 'string' },
         expires: { type: 'string' },
+        days: { type: 'string', default: '60' },
         'dry-run': { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h' },
     },
@@ -72,6 +82,8 @@ const dryRun = values['dry-run'];
 const mark = dryRun ? '○' : '✓';
 
 const commands: Record<string, { argc: number; run: (db: Db, args: string[]) => Promise<number> }> = {
+    stock: { argc: 0, run: runStock },
+    events: { argc: 0, run: runEvents },
     'organizer list': { argc: 0, run: runOrganizerList },
     'organizer add': { argc: 1, run: runOrganizerAdd },
     'medication list': { argc: 0, run: runMedicationList },
@@ -105,6 +117,22 @@ try {
     process.exitCode = 1;
 } finally {
     await db.$client.end();
+}
+
+async function runStock(db: Db): Promise<number> {
+    const input = await loadPlanInput(db, await findUser(db, values.user), values.date && parseDate('--date', values.date));
+    for (const line of stockTable(plan(input), input.organizers)) console.log(line);
+    return 0;
+}
+
+async function runEvents(db: Db): Promise<number> {
+    const input = await loadPlanInput(db, await findUser(db, values.user), values.date && parseDate('--date', values.date));
+    const until = addDays(input.today, parsePositiveInt('--days', values.days));
+    const events = plan(input).events.filter(
+        (event) => event.actionDate <= until || event.action === 'contact-doctor' || event.action === 'pickup-before-expiry',
+    );
+    for (const line of eventTable(events, input.organizers, input.today)) console.log(line);
+    return 0;
 }
 
 async function runOrganizerList(db: Db): Promise<number> {
