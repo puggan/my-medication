@@ -119,6 +119,21 @@ export function plan(input: PlanInput): Plan {
     return { statuses, events };
 }
 
+/**
+ * The day a medication's dose became 0 in every organizer, if it is 0 on date; undefined while it
+ * is taken, and for a medication without any dose yet.
+ */
+export function zeroDoseSince(medication: PlanMedication, date: string): string | undefined {
+    const latest = new Map<number, PlanDose>();
+    for (const dose of medication.doses) {
+        if (dose.startDate > date) continue;
+        const current = latest.get(dose.organizerId);
+        if (!current || dose.startDate > current.startDate) latest.set(dose.organizerId, dose);
+    }
+    if (latest.size === 0 || [...latest.values()].some((dose) => dose.perDay > 0)) return undefined;
+    return [...latest.values()].reduce((last, dose) => (dose.startDate > last ? dose.startDate : last), '');
+}
+
 /** Stock of one medication at the end of date, from the recorded transfers alone. */
 export function stockAt(input: PlanInput, medication: PlanMedication, date: string): Stock {
     return new MedicationPlan(input, medication).history(date);

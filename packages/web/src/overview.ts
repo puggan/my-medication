@@ -1,10 +1,12 @@
-import { addDays, plan, type PlanInput } from '@med/core';
+import { addDays, plan, zeroDoseSince, type PlanInput } from '@med/core';
 import type { Overview, OverviewEvent } from './types.ts';
 
 export type { Overview, OverviewEvent, OverviewMedication } from './types.ts';
 
 /** How far ahead pickups and refills are listed; doctor contacts and expiries always are. */
 const LIST_DAYS = 60;
+/** A medication no longer taken leaves the stock table this long after its dose became 0. */
+const HIDE_AFTER_DAYS = 7;
 
 const tablets = (hundredths: number) => hundredths / 100;
 
@@ -56,7 +58,12 @@ export function overview(input: PlanInput, userName: string): Overview {
         today: input.today,
         user: userName,
         organizers: input.organizers.map(({ id, name }) => ({ id, name })),
-        medications: statuses.map(({ medication, doses, stock, tier3 }) => ({
+        medications: statuses
+            .filter(({ medication }) => {
+                const since = zeroDoseSince(medication, input.today);
+                return since === undefined || addDays(since, HIDE_AFTER_DAYS) > input.today;
+            })
+            .map(({ medication, doses, stock, tier3 }) => ({
             nextPickup: events.find(
                 (e) => e.medicationId === medication.id && (e.action === 'pickup' || e.action === 'pickup-before-expiry'),
             )?.actionDate,
