@@ -69,6 +69,18 @@ export async function addMedication(
     return findMedication(tx, owner, values.name);
 }
 
+/** Change the default package; values left out stay as they are. */
+export async function updateMedication(
+    tx: Tx,
+    med: Medication,
+    values: { packageSize?: number; packagePrice?: string },
+): Promise<void> {
+    if (values.packageSize === undefined && values.packagePrice === undefined) {
+        throw new Error('Nothing to change, give --package-size and/or --price');
+    }
+    await tx.update(medication).set(values).where(eq(medication.id, med.id));
+}
+
 /** Set the dose in one organizer from a date on; a row already starting that day is replaced. */
 export async function setDose(tx: Tx, med: Medication, box: Organizer, perDay: string, from: string): Promise<void> {
     await tx
