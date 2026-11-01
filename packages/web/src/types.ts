@@ -11,6 +11,9 @@ export interface OverviewMedication {
     tier1: Record<number, number>;
     tier2: number;
     tier3: number;
+    /** Next pickup of any kind and next doctor contact, however far ahead. */
+    nextPickup?: string;
+    nextReorder?: string;
 }
 
 export type OverviewEvent =

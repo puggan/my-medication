@@ -57,6 +57,10 @@ export function overview(input: PlanInput, userName: string): Overview {
         user: userName,
         organizers: input.organizers.map(({ id, name }) => ({ id, name })),
         medications: statuses.map(({ medication, doses, stock, tier3 }) => ({
+            nextPickup: events.find(
+                (e) => e.medicationId === medication.id && (e.action === 'pickup' || e.action === 'pickup-before-expiry'),
+            )?.actionDate,
+            nextReorder: events.find((e) => e.medicationId === medication.id && e.action === 'contact-doctor')?.actionDate,
             id: medication.id,
             name: medication.name,
             packageSize: medication.packageSize,
