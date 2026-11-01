@@ -187,14 +187,16 @@ export const stockCount = mysqlTable(
 );
 
 /**
- * WebAuthn credential registered from the web. It starts out pending, shown with pairingCode,
- * and only the CLI can connect it to a user and approve it; login accepts approved, unrevoked keys.
+ * WebAuthn credential registered from the web for requestedName. It starts out pending, shown with
+ * pairingCode, and only the CLI can connect it to a user and approve it. A pending key can log in,
+ * but only to be told it waits for approval; revoked keys can't log in at all.
  */
 export const passkey = mysqlTable(
     'passkey',
     {
         id: int({ unsigned: true }).autoincrement().primaryKey(),
         userId: int({ unsigned: true }),
+        requestedName: varchar({ length: 64 }).notNull(),
         credentialId: varbinary({ length: 1023 }).notNull(),
         publicKey: varbinary({ length: 1023 }).notNull(),
         signCount: int({ unsigned: true }).notNull().default(0),
@@ -209,6 +211,7 @@ export const passkey = mysqlTable(
     (t) => [
         uniqueIndex('passkey_credential').on(t.credentialId),
         index('passkey_pairing_code').on(t.pairingCode),
+        index('passkey_requested_name').on(t.requestedName),
         foreignKey({ name: 'passkey_user', columns: [t.userId], foreignColumns: [user.id] }),
         check('passkey_approved_user', sql`approved_at IS NULL OR user_id IS NOT NULL`),
     ],
