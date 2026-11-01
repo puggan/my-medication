@@ -21,7 +21,10 @@ export type OverviewEvent =
           action: 'refill';
           organizerId: number;
           organizerName: string;
+          /** The last day the organizer still has tablets: refill it that evening at the latest. */
           actionDate: string;
+          /** From when it can be refilled, a container being free. */
+          availableFrom: string;
           runsOut: string;
           items: { medicationId: number; name: string; tablets: number }[];
       }
