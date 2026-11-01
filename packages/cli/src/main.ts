@@ -42,6 +42,9 @@ import { listPrices } from './price.ts';
 import { eventTable, stockTable } from './report.ts';
 import { inTransaction } from './transaction.ts';
 
+/** Most paid for prescription medicines per 12-month high-cost period (periods from 2025-07-01). */
+const HIGH_COST_CAP = 3800;
+
 const USAGE = `Usage:
   med stock [--date YYYY-MM-DD]
       Dose and stock per tier at the end of --date (default today).
@@ -80,8 +83,8 @@ const USAGE = `Usage:
       also adds the price per package to the price history, with --product as sold.
 
   med price list [<name>]
-      Prices with the cost per year at today's dose, and the yearly total from each medication's
-      latest price, as the high-cost protection counts per year.
+      Prices with the cost per year at today's dose, at full price and with the discount the
+      high-cost cap gives over a year, and the yearly total from each medication's latest price.
 
   med price add <name> <kr per package> [--product <name>] [--package-size <tablets>] [--date YYYY-MM-DD]
       Price history in SEK, e.g. from receipts of pickups made before tracking started; --product
@@ -436,18 +439,30 @@ async function runPriceList(db: Db, [name]: string[]): Promise<number> {
         (Number(row.pricePerPackage) / row.packageSize) * (perDay.get(row.medicationId) ?? 0) * 365;
     const kr = (amount: number) => `${Math.round(amount)} kr`;
 
-    for (const row of prices) {
-        const source = row.transferId === null ? '' : `  (pickup #${row.transferId})`;
-        console.log(
-            `${row.date}  ${row.name.padEnd(14)}  ${row.pricePerPackage.padStart(9)} ${row.currency} / ${String(row.packageSize).padEnd(4)}` +
-                `${kr(yearly(row)).padStart(9)}/year  ${row.product ?? ''}${source}`.trimEnd(),
-        );
-    }
-
+    // The high-cost protection caps what is paid per period, which works out as one discount
+    // rate over the whole year once the full-price total is above the cap
     const latest = new Map<number, (typeof prices)[number]>();
     for (const row of prices) latest.set(row.medicationId, row);
     const total = [...latest.values()].reduce((sum, row) => sum + yearly(row), 0);
-    console.log(`\nPer year at today's dose, latest price each: ${kr(total)} for ${latest.size} medication${latest.size === 1 ? '' : 's'}`);
+    const share = total > HIGH_COST_CAP ? HIGH_COST_CAP / total : 1;
+
+    console.log(`${'Date'.padEnd(10)}  ${'Medication'.padEnd(14)}  ${'Package'.padStart(18)}  ${'Per year'.padStart(9)}  ${'Discounted'.padStart(10)}  Product`);
+    for (const row of prices) {
+        const source = row.transferId === null ? '' : `  (pickup #${row.transferId})`;
+        console.log(
+            `${row.date}  ${row.name.padEnd(14)}  ${row.pricePerPackage.padStart(9)} ${row.currency} / ${String(row.packageSize).padEnd(3)}` +
+                `  ${kr(yearly(row)).padStart(9)}  ${kr(yearly(row) * share).padStart(10)}  ${row.product ?? ''}${source}`.trimEnd(),
+        );
+    }
+
+    const medications = `${latest.size} medication${latest.size === 1 ? '' : 's'}`;
+    console.log(`\nPer year at today's dose, latest price each, ${medications}: ${kr(total)}`);
+    if (share < 1) {
+        console.log(
+            `With the ${HIGH_COST_CAP} kr high-cost cap you pay ${kr(HIGH_COST_CAP)}: ` +
+                `${Math.round((1 - share) * 100)} % discount over the year`,
+        );
+    }
     return 0;
 }
 
