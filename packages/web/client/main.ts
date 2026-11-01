@@ -212,7 +212,13 @@ async function renderOverview(): Promise<void> {
             'header',
             {},
             h('h1', {}, 'Medication stock'),
-            h('div', {}, h('span', { className: 'muted' }, `${data.user} · ${data.today} `), h('button', { onclick: logout as EventListener }, 'Log out')),
+            h(
+                'div',
+                { className: 'choices' },
+                h('span', { className: 'muted' }, `${data.user} · ${data.today}`),
+                h('button', { onclick: feedDialog as EventListener }, 'Calendar feed'),
+                h('button', { onclick: logout as EventListener }, 'Log out'),
+            ),
         ),
         h('h2', {}, 'Stock'),
         stockTable(data),
@@ -549,6 +555,69 @@ function countDialog(med: OverviewMedication): void {
         h('div', { className: 'actions' }, cancelButton(), save, saveDrop),
     );
     void loadExpected();
+}
+
+function feedDialog(): void {
+    const name = h('input', { id: 'feed-name', value: 'Calendar', maxlength: '64' });
+    const status = h('p', {});
+    const create = h('button', { className: 'primary' }, 'Create feed');
+    create.addEventListener('click', async () => {
+        create.disabled = true;
+        try {
+            const { url } = await post<{ url: string }>('/api/feeds', { name: name.value });
+            showFeed(url);
+        } catch (error) {
+            if (error instanceof Unauthorized) {
+                closeDialog();
+                renderLogin('Your session ended, log in again.');
+                return;
+            }
+            status.className = 'error';
+            status.textContent = (error as Error).message;
+            create.disabled = false;
+        }
+    });
+    openDialog(
+        'Calendar feed',
+        h('p', {}, 'A private address your calendar app can subscribe to, with the actions from this page as all-day events.'),
+        h('label', { for: 'feed-name' }, 'Name, to recognise it in the command line'),
+        name,
+        status,
+        h('div', { className: 'actions' }, cancelButton(), create),
+    );
+}
+
+function showFeed(url: string): void {
+    const field = h('input', { value: url, readonly: true });
+    const copied = h('p', { className: 'muted' });
+    const copy = h('button', {}, 'Copy');
+    copy.addEventListener('click', async () => {
+        field.select();
+        try {
+            await navigator.clipboard.writeText(url);
+            copied.textContent = 'Copied.';
+        } catch {
+            copied.textContent = 'Select the address and copy it by hand.';
+        }
+    });
+    openDialog(
+        'Calendar feed created',
+        h('p', {}, 'Subscribe to this address in your calendar. It is shown only now; anyone with it can read your actions.'),
+        field,
+        copied,
+        h(
+            'p',
+            { className: 'detail' },
+            'Google Calendar: Other calendars → From URL, with https:// instead of webcal://. Revoke it with pnpm med feed revoke.',
+        ),
+        h(
+            'div',
+            { className: 'actions' },
+            copy,
+            h('a', { href: url, className: 'button primary' }, 'Open in calendar app'),
+            h('button', { type: 'button', onclick: closeDialog as EventListener }, 'Done'),
+        ),
+    );
 }
 
 function medicationMenu(med: OverviewMedication): void {

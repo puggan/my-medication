@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import { secureHeaders } from 'hono/secure-headers';
 import { connectVerified } from '@med/db';
 import { api } from './api.ts';
+import { feed, feedUser } from './calendar.ts';
 import { origin, port, publicDir } from './config.ts';
 
 const db = await connectVerified();
@@ -33,6 +34,14 @@ app.use('/api/*', async (c, next) => {
     await next();
 });
 app.route('/api', api(db));
+app.get('/calendar/:file{[A-Za-z0-9_-]{43}\\.ics}', async (c) => {
+    const owner = await feedUser(db, c.req.param('file').slice(0, -'.ics'.length));
+    if (!owner) return c.text('No such calendar feed', 404);
+    return c.body(await feed(db, owner), 200, {
+        'content-type': 'text/calendar; charset=utf-8',
+        'cache-control': 'private, max-age=900',
+    });
+});
 app.use('*', serveStatic({ root: publicDir }));
 app.get('*', serveStatic({ root: publicDir, path: 'index.html' }));
 

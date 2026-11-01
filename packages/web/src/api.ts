@@ -22,6 +22,7 @@ import {
     verifyLogin,
     verifyRegistration,
 } from './auth.ts';
+import { createFeed } from './calendar.ts';
 import { overview } from './overview.ts';
 
 /** A request the user can fix; answered with 400 and the message. */
@@ -74,7 +75,7 @@ async function body(c: Context): Promise<Record<string, unknown>> {
 }
 
 export function api(db: Db) {
-    const app = new Hono<{ Variables: { user: User } }>();
+    const app = new Hono<{ Variables: { user: User; passkeyId: number } }>();
 
     app.onError((error, c) => {
         if (error instanceof InputError || error instanceof AuthError) return c.json({ error: error.message }, 400);
@@ -122,12 +123,21 @@ export function api(db: Db) {
         const login = await currentLogin(db, c);
         if (login.state !== 'approved') return c.json({ error: 'Not logged in' }, 401);
         c.set('user', login.user);
+        c.set('passkeyId', login.passkey.id);
         await next();
     });
 
     app.get('/overview', async (c) => {
         const owner = c.get('user');
         return c.json(overview(await loadPlanInput(db, owner), owner.name));
+    });
+
+    /** A new calendar feed URL, shown this once. */
+    app.post('/feeds', async (c) => {
+        const input = await body(c);
+        const name = typeof input.name === 'string' && input.name.trim() !== '' ? input.name.trim() : 'Calendar';
+        if (name.length > 64) throw new InputError('A feed name is at most 64 characters');
+        return c.json({ url: await createFeed(db, c.get('passkeyId'), name) });
     });
 
     app.post('/refill', async (c) => {

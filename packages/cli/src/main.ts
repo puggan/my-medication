@@ -26,6 +26,7 @@ import {
     setDose,
     updateMedication,
 } from './medication.ts';
+import { listFeeds, revokeFeed } from './feed.ts';
 import {
     approvePasskey,
     describePasskey,
@@ -96,6 +97,11 @@ const USAGE = `Usage:
       by default the user named when it was registered. A name tells apart devices that look the
       same; an empty name ("") removes it.
 
+  med feed list
+  med feed revoke <id>
+      Calendar feeds created on the web. A feed also stops working when the passkey that created
+      it is revoked.
+
   --user <name> may be left out while there is only one user, and --organizer <name> while the
   medication is only in one organizer.
   --dry-run checks everything, then rolls back instead of saving.`;
@@ -135,6 +141,8 @@ const commands: Record<string, { argc: number; run: (db: Db, args: string[]) => 
     'passkey approve': { argc: 1, run: runPasskeyApprove },
     'passkey name': { argc: 2, run: runPasskeyName },
     'passkey revoke': { argc: 1, run: runPasskeyRevoke },
+    'feed list': { argc: 0, run: runFeedList },
+    'feed revoke': { argc: 1, run: runFeedRevoke },
     'organizer list': { argc: 0, run: runOrganizerList },
     'organizer add': { argc: 1, run: runOrganizerAdd },
     'medication list': { argc: 0, run: runMedicationList },
@@ -229,6 +237,26 @@ async function runPasskeyName(db: Db, [idOrCode, name]: string[]): Promise<numbe
 async function runPasskeyRevoke(db: Db, [idOrCode]: string[]): Promise<number> {
     const key = await inTransaction(db, dryRun, (tx) => revokePasskey(tx, idOrCode!));
     console.log(`${mark} Revoked passkey #${key.id}, ${describePasskey(key)}`);
+    return 0;
+}
+
+async function runFeedList(db: Db): Promise<number> {
+    const feeds = await listFeeds(db);
+    if (feeds.length === 0) console.log('No calendar feeds yet');
+    for (const { feed, passkey } of feeds) {
+        const state = feed.revokedAt !== null ? 'revoked' : passkey.revokedAt !== null ? 'passkey revoked' : 'active';
+        const fetched = feed.lastFetchedAt === null ? 'never fetched' : `last fetched ${feed.lastFetchedAt}`;
+        console.log(
+            `#${feed.id}  ${state.padEnd(15)}  ${feed.name}  from passkey #${passkey.id} ${describePasskey(passkey)}  ` +
+                `(created ${feed.createdAt}, ${fetched})`,
+        );
+    }
+    return 0;
+}
+
+async function runFeedRevoke(db: Db, [id]: string[]): Promise<number> {
+    const feed = await inTransaction(db, dryRun, (tx) => revokeFeed(tx, parsePositiveInt('id', id!)));
+    console.log(`${mark} Revoked calendar feed #${feed.id} (${feed.name})`);
     return 0;
 }
 
