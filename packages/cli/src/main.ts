@@ -6,6 +6,7 @@ import {
     addDrop,
     addMedication,
     addOrganizer,
+    addRenew,
     findMedication,
     findOrganizer,
     findUser,
@@ -31,6 +32,10 @@ const USAGE = `Usage:
       Change the dose in --organizer from --from (default today) on. 0 ends the medication there;
       a medication taken morning and evening has a dose in both organizers.
 
+  med renew <name> <tablets> --expires YYYY-MM-DD [--date YYYY-MM-DD] [--note <text>]
+      A prescription adding tablets to tier 3 on --date (default today), usable until --expires.
+      What is left on a prescription when tracking starts is recorded the same way.
+
   med drop <name> <tier> <tablets> [--date YYYY-MM-DD] [--note <text>]
       Tablets that left tier 1-3 outside the normal flow (lost, broken, expired), dated at the end
       of --date (default today). Tier 1 drops are per --organizer. Negative tablets were found; opening stock is a negative drop
@@ -53,6 +58,7 @@ const { positionals, values } = parseArgs({
         'package-size': { type: 'string' },
         price: { type: 'string' },
         note: { type: 'string' },
+        expires: { type: 'string' },
         'dry-run': { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h' },
     },
@@ -67,6 +73,7 @@ const commands: Record<string, { argc: number; run: (db: Db, args: string[]) => 
     'medication list': { argc: 0, run: runMedicationList },
     'medication add': { argc: 1, run: runMedicationAdd },
     'dose set': { argc: 2, run: runDoseSet },
+    renew: { argc: 2, run: runRenew },
     drop: { argc: 3, run: runDrop },
 };
 // Two-word commands take their second word from the positionals
@@ -168,6 +175,22 @@ async function runDoseSet(db: Db, [name, perDay]: string[]): Promise<number> {
     });
     const what = Number(tablets) === 0 ? 'no longer taken' : `${tablets}/day`;
     console.log(`${mark} ${name} ${what} in ${box.name} from ${from}`);
+    return 0;
+}
+
+async function runRenew(db: Db, [name, tablets]: string[]): Promise<number> {
+    if (values.expires === undefined) throw new Error('renew needs --expires');
+    const input = {
+        tablets: parseTablets('tablets', tablets!),
+        date: values.date === undefined ? today() : parseDate('--date', values.date),
+        expiresOn: parseDate('--expires', values.expires),
+        note: values.note,
+    };
+    await inTransaction(db, dryRun, async (tx) => {
+        const owner = await findUser(tx, values.user);
+        await addRenew(tx, owner, await findMedication(tx, owner, name!), input);
+    });
+    console.log(`${mark} ${name}: ${input.tablets} on prescription from ${input.date}, expires ${input.expiresOn}`);
     return 0;
 }
 

@@ -117,3 +117,23 @@ export async function addDrop(
         createdBy: owner.id,
     });
 }
+
+/** A prescription adding tablets to tier 3, usable until expiresOn. */
+export async function addRenew(
+    tx: Tx,
+    owner: User,
+    med: Medication,
+    values: { tablets: string; date: string; expiresOn: string; note?: string },
+): Promise<void> {
+    if (Number(values.tablets) === 0) throw new Error('A prescription of 0 tablets changes nothing');
+    if (values.expiresOn < values.date) throw new Error(`The prescription expires ${values.expiresOn}, before ${values.date}`);
+    await tx.insert(transfer).values({
+        medicationId: med.id,
+        kind: 'renew',
+        tablets: values.tablets,
+        date: values.date,
+        expiresOn: values.expiresOn,
+        note: values.note,
+        createdBy: owner.id,
+    });
+}
