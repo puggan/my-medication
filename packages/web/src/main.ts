@@ -12,6 +12,8 @@ const app = new Hono();
 app.use(
     '*',
     secureHeaders({
+        // Apache sets HSTS, as on the server's other vhosts
+        strictTransportSecurity: false,
         contentSecurityPolicy: {
             defaultSrc: ["'self'"],
             scriptSrc: ["'self'"],
