@@ -225,6 +225,27 @@ export const passkey = mysqlTable(
     ],
 );
 
+/**
+ * Calendar subscription URL, created from the web by a logged-in passkey. Only a SHA-256 hash of the
+ * token is stored; the URL is shown once. It works while neither it nor that passkey is revoked.
+ */
+export const calendarFeed = mysqlTable(
+    'calendar_feed',
+    {
+        id: int({ unsigned: true }).autoincrement().primaryKey(),
+        passkeyId: int({ unsigned: true }).notNull(),
+        tokenHash: char({ length: 64 }).notNull(),
+        name: varchar({ length: 64 }).notNull(),
+        createdAt: createdAt(),
+        lastFetchedAt: timestamp(),
+        revokedAt: timestamp(),
+    },
+    (t) => [
+        uniqueIndex('calendar_feed_token_hash').on(t.tokenHash),
+        foreignKey({ name: 'calendar_feed_passkey', columns: [t.passkeyId], foreignColumns: [passkey.id] }),
+    ],
+);
+
 export type User = typeof user.$inferSelect;
 export type Organizer = typeof organizer.$inferSelect;
 export type Medication = typeof medication.$inferSelect;
@@ -232,3 +253,4 @@ export type Dose = typeof dose.$inferSelect;
 export type Transfer = typeof transfer.$inferSelect;
 export type StockCount = typeof stockCount.$inferSelect;
 export type Passkey = typeof passkey.$inferSelect;
+export type CalendarFeed = typeof calendarFeed.$inferSelect;

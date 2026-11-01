@@ -60,7 +60,9 @@ h2 { font-size: 1.1rem; margin: 28px 0 8px; }
 .error { color: var(--late); }
 header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 
-button {
+button, a.button {
+    display: inline-block;
+    text-decoration: none;
     font: inherit;
     padding: 8px 14px;
     border-radius: 8px;
@@ -69,7 +71,7 @@ button {
     color: var(--text);
     cursor: pointer;
 }
-button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+button.primary, a.button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 button:disabled { opacity: 0.5; cursor: default; }
 button.link { border: none; background: none; padding: 0; color: var(--accent); text-align: left; }
 
