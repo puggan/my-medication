@@ -64,6 +64,13 @@
       "when": 1793542656252,
       "tag": "0008_price_table",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1793543248824,
+      "tag": "0009_price_product",
+      "breakpoints": true
     }
   ]
 }
