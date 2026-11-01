@@ -80,6 +80,9 @@ const USAGE = `Usage:
       also adds the price per package to the price history, with --product as sold.
 
   med price list [<name>]
+      Prices with the cost per year at today's dose, and the yearly total from each medication's
+      latest price, as the high-cost protection counts per year.
+
   med price add <name> <kr per package> [--product <name>] [--package-size <tablets>] [--date YYYY-MM-DD]
       Price history in SEK, e.g. from receipts of pickups made before tracking started; --product
       is the brand and strength as sold, e.g. "Glimepirid Actavis 1mg".
@@ -417,16 +420,34 @@ async function runPickup(db: Db, [name]: string[]): Promise<number> {
 }
 
 async function runPriceList(db: Db, [name]: string[]): Promise<number> {
-    const prices = await listPrices(db, await findUser(db, values.user), name);
-    if (prices.length === 0) console.log(name === undefined ? 'No prices recorded yet' : `No prices recorded for ${name}`);
+    const owner = await findUser(db, values.user);
+    const prices = await listPrices(db, owner, name);
+    if (prices.length === 0) {
+        console.log(name === undefined ? 'No prices recorded yet' : `No prices recorded for ${name}`);
+        return 0;
+    }
+    // Yearly cost at today's total dose, as the high-cost protection counts per year
+    const date = today();
+    const perDay = new Map<number, number>();
+    for (const { med, doses } of await listMedications(db, owner, date)) {
+        perDay.set(med.id, [...doses.values()].reduce((sum, dose) => sum + Number(dose), 0));
+    }
+    const yearly = (row: (typeof prices)[number]) =>
+        (Number(row.pricePerPackage) / row.packageSize) * (perDay.get(row.medicationId) ?? 0) * 365;
+    const kr = (amount: number) => `${Math.round(amount)} kr`;
+
     for (const row of prices) {
-        const perTablet = (Number(row.pricePerPackage) / row.packageSize).toFixed(2);
         const source = row.transferId === null ? '' : `  (pickup #${row.transferId})`;
         console.log(
-            `${row.date}  ${row.name.padEnd(14)}  ${row.pricePerPackage.padStart(9)} ${row.currency} / ${row.packageSize}` +
-                `  = ${perTablet} per tablet  ${row.product ?? ''}${source}`.trimEnd(),
+            `${row.date}  ${row.name.padEnd(14)}  ${row.pricePerPackage.padStart(9)} ${row.currency} / ${String(row.packageSize).padEnd(4)}` +
+                `${kr(yearly(row)).padStart(9)}/year  ${row.product ?? ''}${source}`.trimEnd(),
         );
     }
+
+    const latest = new Map<number, (typeof prices)[number]>();
+    for (const row of prices) latest.set(row.medicationId, row);
+    const total = [...latest.values()].reduce((sum, row) => sum + yearly(row), 0);
+    console.log(`\nPer year at today's dose, latest price each: ${kr(total)} for ${latest.size} medication${latest.size === 1 ? '' : 's'}`);
     return 0;
 }
 
