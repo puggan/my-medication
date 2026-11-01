@@ -1,0 +1,32 @@
+[Unit]
+Description=Medication stock web app (med.sundragon.se)
+After=network-online.target mariadb.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=med
+Group=med
+WorkingDirectory=/srv/med
+EnvironmentFile=/etc/med/med.env
+ExecStart=/usr/bin/node --enable-source-maps /srv/med/server.mjs
+Restart=on-failure
+RestartSec=5
+
+# The app only reads its own files and talks to MariaDB and Apache over localhost
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target
