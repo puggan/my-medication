@@ -228,8 +228,22 @@ async function renderOverview(): Promise<void> {
     );
 }
 
+/** 7/11: day and month only, to keep the table narrow; the full date is in the tooltip. */
+function shortDate(today: string, date: string | undefined): HTMLElement | string {
+    if (date === undefined) return '–';
+    const [, month, day] = date.split('-').map(Number);
+    const days = daysBetween(today, date);
+    const className = days < 0 ? 'badge late' : days <= 7 ? 'badge soon' : '';
+    return h('span', { className, title: date }, `${day}/${month}`);
+}
+
 function stockTable(data: Overview): HTMLElement {
-    const boxes = data.organizers;
+    // One column each for dose and tier 1, the organizers joined with +: Metformin 2+2, the rest 1
+    const perOrganizer = (med: OverviewMedication, values: Record<number, number>) => {
+        const boxes = data.organizers.filter((box) => med.doses[box.id] || med.tier1[box.id]);
+        return boxes.length === 0 ? '–' : boxes.map((box) => fmt(values[box.id] ?? 0)).join('+');
+    };
+    const names = data.organizers.map((box) => box.name).join('+');
     return h(
         'div',
         { className: 'scroll' },
@@ -243,10 +257,12 @@ function stockTable(data: Overview): HTMLElement {
                     'tr',
                     {},
                     h('th', {}, 'Medication'),
-                    ...boxes.map((box) => h('th', { className: 'num' }, `${box.name}/day`)),
-                    ...boxes.map((box) => h('th', { className: 'num' }, `Tier 1 ${box.name}`)),
-                    h('th', { className: 'num' }, 'Tier 2 cupboard'),
-                    h('th', { className: 'num' }, 'Tier 3 pharmacy'),
+                    h('th', { className: 'num', title: `Tablets per day, ${names}` }, 'Per day'),
+                    h('th', { className: 'num', title: `Tier 1, ${names}` }, 'Organizer'),
+                    h('th', { className: 'num', title: 'Tier 2' }, 'Cupboard'),
+                    h('th', { className: 'num', title: 'Tier 3' }, 'Pharmacy'),
+                    h('th', { className: 'num' }, 'Pickup'),
+                    h('th', { className: 'num', title: 'Contact the doctor for a new prescription' }, 'Re-order'),
                 ),
             ),
             h(
@@ -257,17 +273,16 @@ function stockTable(data: Overview): HTMLElement {
                         'tr',
                         {},
                         h('td', {}, h('button', { className: 'link', onclick: (() => medicationMenu(med)) as EventListener }, med.name)),
-                        ...boxes.map((box) => h('td', { className: 'num' }, med.doses[box.id] ? fmt(med.doses[box.id]!) : '–')),
-                        ...boxes.map((box) =>
-                            h('td', { className: 'num' }, med.doses[box.id] || med.tier1[box.id] ? fmt(med.tier1[box.id] ?? 0) : '–'),
-                        ),
+                        h('td', { className: 'num' }, perOrganizer(med, med.doses)),
+                        h('td', { className: 'num' }, perOrganizer(med, med.tier1)),
                         h('td', { className: 'num' }, fmt(med.tier2)),
                         h(
                             'td',
-                            { className: 'num' },
+                            { className: 'num', title: `${(med.tier3 / med.packageSize).toFixed(2)} packages` },
                             fmt(med.tier3),
-                            h('span', { className: 'detail' }, ` (${(med.tier3 / med.packageSize).toFixed(2)} pkg)`),
                         ),
+                        h('td', { className: 'num' }, shortDate(data.today, med.nextPickup)),
+                        h('td', { className: 'num' }, shortDate(data.today, med.nextReorder)),
                     ),
                 ),
             ),
