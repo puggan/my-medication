@@ -43,6 +43,15 @@ function tabletCount(name: string, value: unknown, { allowZero = false } = {}): 
     return hundredths;
 }
 
+/** An optional amount in SEK with at most two decimals, as the decimal string stored. */
+function optionalMoney(name: string, value: unknown): string | undefined {
+    if (value === undefined || value === null || value === '') return undefined;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) throw new InputError(`${name} must be an amount`);
+    const cents = Math.round(value * 100);
+    if (Math.abs(cents - value * 100) > 1e-6) throw new InputError(`${name} can have at most two decimals`);
+    return (cents / 100).toFixed(2);
+}
+
 function dateString(name: string, value: unknown): string {
     if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) {
         throw new InputError(`${name} must be a date`);
@@ -167,6 +176,7 @@ export function api(db: Db) {
             await recordPickup(tx, owner, med, {
                 packages: positiveInt('packages', input.packages),
                 packageSize: positiveInt('packageSize', input.packageSize),
+                pricePerPackage: optionalMoney('pricePerPackage', input.pricePerPackage),
                 date: today(),
             });
         });

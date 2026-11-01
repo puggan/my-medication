@@ -71,10 +71,7 @@ export const organizer = mysqlTable(
     ],
 );
 
-/**
- * packageSize and packagePrice are the usual package; actual pickups record what they got and paid.
- * The yearly cost is calculated from the dose, never stored.
- */
+/** packageSize is the usual package; actual pickups record what they got, and prices go in price. */
 export const medication = mysqlTable(
     'medication',
     {
@@ -82,7 +79,6 @@ export const medication = mysqlTable(
         userId: int({ unsigned: true }).notNull(),
         name: varchar({ length: 128 }).notNull(),
         packageSize: smallint({ unsigned: true }).notNull(),
-        packagePrice: money(),
         createdAt: createdAt(),
     },
     (t) => [
@@ -141,8 +137,6 @@ export const transfer = mysqlTable(
         organizerId: int({ unsigned: true }),
         packages: smallint({ unsigned: true }),
         packageSize: smallint({ unsigned: true }),
-        /** Total paid for a pickup. */
-        price: money(),
         /** Only for renew: the last day the prescription can be picked up. */
         expiresOn: day(),
         note: varchar({ length: 255 }),
@@ -159,7 +153,6 @@ export const transfer = mysqlTable(
         check('transfer_tablets', sql`kind = 'drop' OR tablets > 0`),
         check('transfer_organizer_tier', sql`(organizer_id IS NOT NULL) = (kind = 'refill' OR tier = 1)`),
         check('transfer_expires', sql`(kind = 'renew') = (expires_on IS NOT NULL)`),
-        check('transfer_price', sql`price IS NULL OR kind = 'pickup'`),
         check('transfer_packages', sql`(packages IS NULL) = (package_size IS NULL) AND (packages IS NULL OR kind = 'pickup')`),
     ],
 );
@@ -225,6 +218,39 @@ export const passkey = mysqlTable(
     ],
 );
 
+/** Currencies prices can be in; only SEK for now. */
+export const currencies = ['SEK'] as const;
+export type Currency = (typeof currencies)[number];
+
+/**
+ * What a package cost on date, from a receipt. transferId links the pickup it was paid at; prices
+ * from before tracking started have none. The yearly cost is calculated from these and the dose.
+ */
+export const price = mysqlTable(
+    'price',
+    {
+        id: int({ unsigned: true }).autoincrement().primaryKey(),
+        medicationId: int({ unsigned: true }).notNull(),
+        transferId: int({ unsigned: true }),
+        date: day().notNull(),
+        packageSize: smallint({ unsigned: true }).notNull(),
+        pricePerPackage: money().notNull(),
+        currency: char({ length: 3, enum: currencies }).notNull().default('SEK'),
+        createdBy: int({ unsigned: true }).notNull(),
+        createdAt: createdAt(),
+    },
+    (t) => [
+        index('price_medication_date').on(t.medicationId, t.date),
+        uniqueIndex('price_transfer').on(t.transferId),
+        foreignKey({ name: 'price_medication', columns: [t.medicationId], foreignColumns: [medication.id] }),
+        foreignKey({ name: 'price_transfer_fk', columns: [t.transferId], foreignColumns: [transfer.id] }).onDelete('set null'),
+        foreignKey({ name: 'price_created_by', columns: [t.createdBy], foreignColumns: [user.id] }),
+        check('price_package_size', sql`package_size > 0`),
+        check('price_per_package', sql`price_per_package >= 0`),
+        check('price_currency', sql`currency = 'SEK'`),
+    ],
+);
+
 /**
  * Calendar subscription URL, created from the web by a logged-in passkey. Only a SHA-256 hash of the
  * token is stored; the URL is shown once. It works while neither it nor that passkey is revoked.
@@ -254,3 +280,4 @@ export type Transfer = typeof transfer.$inferSelect;
 export type StockCount = typeof stockCount.$inferSelect;
 export type Passkey = typeof passkey.$inferSelect;
 export type CalendarFeed = typeof calendarFeed.$inferSelect;
+export type Price = typeof price.$inferSelect;

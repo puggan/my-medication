@@ -66,7 +66,7 @@ export async function findMedication(db: Db | Tx, owner: User, name: string): Pr
 export async function addMedication(
     tx: Tx,
     owner: User,
-    values: { name: string; organizer: Organizer; perDay: string; packageSize: number; packagePrice?: string; from: string },
+    values: { name: string; organizer: Organizer; perDay: string; packageSize: number; from: string },
 ): Promise<Medication> {
     const [existing] = await tx
         .select({ id: medication.id })
@@ -78,7 +78,6 @@ export async function addMedication(
         userId: owner.id,
         name: values.name,
         packageSize: values.packageSize,
-        packagePrice: values.packagePrice,
     }).$returningId() as [{ id: number }];
     await tx
         .insert(dose)
@@ -86,15 +85,9 @@ export async function addMedication(
     return findMedication(tx, owner, values.name);
 }
 
-/** Change the default package; values left out stay as they are. */
-export async function updateMedication(
-    tx: Tx,
-    med: Medication,
-    values: { packageSize?: number; packagePrice?: string },
-): Promise<void> {
-    if (values.packageSize === undefined && values.packagePrice === undefined) {
-        throw new Error('Nothing to change, give --package-size and/or --price');
-    }
+/** Change the default package size. */
+export async function updateMedication(tx: Tx, med: Medication, values: { packageSize?: number }): Promise<void> {
+    if (values.packageSize === undefined) throw new Error('Nothing to change, give --package-size');
     await tx.update(medication).set(values).where(eq(medication.id, med.id));
 }
 
