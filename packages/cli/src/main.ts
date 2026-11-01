@@ -55,10 +55,10 @@ const USAGE = `Usage:
       Change the dose in --organizer from --from (default today) on. 0 ends the medication there;
       a medication taken morning and evening has a dose in both organizers.
 
-  med refill [<name>] [--date YYYY-MM-DD]
-      Record the refills due by --date (default today), of every medication or only <name>, with
-      the amounts med events suggests. --tablets (with --organizer for a medication in several)
-      records one other amount instead.
+  med refill [<name>] [--organizer <name>] [--date YYYY-MM-DD]
+      Record the refills due by --date (default today), of every medication or only <name>, in
+      every organizer or only --organizer, with the amounts med events suggests. --tablets with a
+      <name> records one other amount instead.
 
   med pickup <name> [--packages 1] [--package-size <tablets>] [--price <kr>] [--date YYYY-MM-DD]
       Packages picked up at the pharmacy; the package size defaults to the medication's.
@@ -273,17 +273,26 @@ async function runRefill(db: Db, [name]: string[]): Promise<number> {
             return [`${name}: ${formatTablets(tablets)} ${box.name}`];
         }
         const input = await loadPlanInput(tx, owner, date);
-        const due = plan(input).events.filter(
-            (event) => event.action === 'refill' && event.actionDate <= date && (name === undefined || event.medicationName === name),
-        );
-        if (due.length === 0) throw new Error(`No refill due by ${date}${name === undefined ? '' : ` for ${name}`}`);
+        const only = values.organizer === undefined ? undefined : await findOrganizer(tx, owner, values.organizer);
+        const due = plan(input)
+            .events.filter(
+                (event) =>
+                    event.action === 'refill' && event.actionDate <= date && (name === undefined || event.medicationName === name),
+            )
+            .map((event) => ({
+                name: event.medicationName,
+                amounts: only === undefined ? event.refill! : new Map([...event.refill!].filter(([id]) => id === only.id)),
+            }))
+            .filter((event) => event.amounts.size > 0);
+        const what = [name, only?.name].filter((part) => part !== undefined).join(' in ');
+        if (due.length === 0) throw new Error(`No refill due by ${date}${what === '' ? '' : ` for ${what}`}`);
         const lines: string[] = [];
         for (const event of due) {
-            await recordRefill(tx, owner, await findMedication(tx, owner, event.medicationName), { amounts: event.refill!, date });
-            const amounts = [...event.refill!].map(
+            await recordRefill(tx, owner, await findMedication(tx, owner, event.name), { amounts: event.amounts, date });
+            const amounts = [...event.amounts].map(
                 ([id, n]) => `${formatTablets(n)} ${input.organizers.find((box) => box.id === id)!.name}`,
             );
-            lines.push(`${event.medicationName}: ${amounts.join(' + ')}`);
+            lines.push(`${event.name}: ${amounts.join(' + ')}`);
         }
         return lines;
     });
