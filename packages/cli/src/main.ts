@@ -1,9 +1,9 @@
 #!/usr/bin/env -S node --import tsx
 import { parseArgs } from 'node:util';
 import {
-    addDays,
     formatTablets,
     fromDecimal,
+    listedEvents,
     loadPlanInput,
     plan,
     recordCount,
@@ -45,8 +45,9 @@ const USAGE = `Usage:
       Dose and stock per tier at the end of --date (default today).
 
   med events [--days 60] [--date YYYY-MM-DD]
-      Actions due within --days of --date (default today): the next refill per medication, pickups,
-      and every doctor contact and expiry however far ahead.
+      Actions due within --days of --date (default today): the next refill per medication and
+      pickups, plus however far ahead the next pickup of each medication, and every doctor
+      contact and pickup before expiry.
 
   med organizer list
   med organizer add <name> --containers <n> [--container-days 7]
@@ -191,10 +192,7 @@ async function runStock(db: Db): Promise<number> {
 
 async function runEvents(db: Db): Promise<number> {
     const input = await loadPlanInput(db, await findUser(db, values.user), values.date && parseDate('--date', values.date));
-    const until = addDays(input.today, parsePositiveInt('--days', values.days));
-    const events = plan(input).events.filter(
-        (event) => event.actionDate <= until || event.action === 'contact-doctor' || event.action === 'pickup-before-expiry',
-    );
+    const events = listedEvents(plan(input).events, input.today, parsePositiveInt('--days', values.days));
     for (const line of eventTable(events, input.organizers, input.today)) console.log(line);
     return 0;
 }

@@ -1,9 +1,9 @@
-import { addDays, plan, zeroDoseSince, type PlanInput } from '@med/core';
+import { addDays, listedEvents, plan, zeroDoseSince, type PlanInput } from '@med/core';
 import type { Overview, OverviewEvent } from './types.ts';
 
 export type { Overview, OverviewEvent, OverviewMedication } from './types.ts';
 
-/** How far ahead pickups and refills are listed; doctor contacts and expiries always are. */
+/** How far ahead later pickups and refills are listed; see listedEvents for what always is. */
 const LIST_DAYS = 60;
 /** A medication no longer taken leaves the stock table this long after its dose became 0. */
 const HIDE_AFTER_DAYS = 7;
@@ -16,7 +16,7 @@ export function overview(input: PlanInput, userName: string): Overview {
     const listed: OverviewEvent[] = [];
     const refills = new Map<number, Extract<OverviewEvent, { action: 'refill' }>>();
 
-    for (const event of events) {
+    for (const event of listedEvents(events, input.today, LIST_DAYS)) {
         if (event.action === 'refill') {
             // One row per organizer, as it is filled in one go
             for (const [organizerId, amount] of event.refill!) {
@@ -39,7 +39,7 @@ export function overview(input: PlanInput, userName: string): Overview {
                 row.items.push({ medicationId: event.medicationId, name: event.medicationName, tablets: tablets(amount) });
                 refills.set(organizerId, row);
             }
-        } else if (event.actionDate <= until || event.action === 'contact-doctor' || event.action === 'pickup-before-expiry') {
+        } else {
             listed.push({
                 action: event.action,
                 medicationId: event.medicationId,

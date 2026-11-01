@@ -120,6 +120,21 @@ export function plan(input: PlanInput): Plan {
 }
 
 /**
+ * The events worth listing: everything within days of today, plus however far ahead every doctor
+ * contact, every pickup before expiry, and the next pickup of each medication.
+ */
+export function listedEvents(events: PlanEvent[], today: string, days: number): PlanEvent[] {
+    const until = addDays(today, days);
+    const nextPickup = new Set<number>();
+    return events.filter((event) => {
+        const isPickup = event.action === 'pickup' || event.action === 'pickup-before-expiry';
+        const first = isPickup && !nextPickup.has(event.medicationId);
+        if (isPickup) nextPickup.add(event.medicationId);
+        return event.actionDate <= until || first || event.action === 'contact-doctor' || event.action === 'pickup-before-expiry';
+    });
+}
+
+/**
  * The day a medication's dose became 0 in every organizer, if it is 0 on date; undefined while it
  * is taken, and for a medication without any dose yet.
  */
