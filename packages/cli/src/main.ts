@@ -13,6 +13,7 @@ import {
     listMedications,
     listOrganizers,
     setDose,
+    updateMedication,
 } from './medication.ts';
 import { inTransaction } from './transaction.ts';
 
@@ -27,6 +28,9 @@ const USAGE = `Usage:
 
   med medication add <name> --per-day <tablets> --package-size <tablets> [--price <kr>] [--from YYYY-MM-DD]
       Add a medication with its first dose in --organizer, starting --from (default today).
+
+  med medication set <name> [--package-size <tablets>] [--price <kr>]
+      Change the default package size or price.
 
   med dose set <name> <tablets per day> [--from YYYY-MM-DD]
       Change the dose in --organizer from --from (default today) on. 0 ends the medication there;
@@ -72,6 +76,7 @@ const commands: Record<string, { argc: number; run: (db: Db, args: string[]) => 
     'organizer add': { argc: 1, run: runOrganizerAdd },
     'medication list': { argc: 0, run: runMedicationList },
     'medication add': { argc: 1, run: runMedicationAdd },
+    'medication set': { argc: 1, run: runMedicationSet },
     'dose set': { argc: 2, run: runDoseSet },
     renew: { argc: 2, run: runRenew },
     drop: { argc: 3, run: runDrop },
@@ -161,6 +166,22 @@ async function runMedicationAdd(db: Db, [name]: string[]): Promise<number> {
     console.log(
         `${mark} Added ${input.name}: ${input.perDay}/day in ${box.name} from ${input.from}, package of ${input.packageSize}`,
     );
+    return 0;
+}
+
+async function runMedicationSet(db: Db, [name]: string[]): Promise<number> {
+    const input = {
+        packageSize: values['package-size'] === undefined ? undefined : parsePositiveInt('--package-size', values['package-size']),
+        packagePrice: values.price === undefined ? undefined : parseMoney('--price', values.price),
+    };
+    await inTransaction(db, dryRun, async (tx) => {
+        await updateMedication(tx, await findMedication(tx, await findUser(tx, values.user), name!), input);
+    });
+    const changes = [
+        input.packageSize === undefined ? undefined : `package of ${input.packageSize}`,
+        input.packagePrice === undefined ? undefined : `price ${input.packagePrice}`,
+    ].filter((change) => change !== undefined);
+    console.log(`${mark} ${name}: ${changes.join(', ')}`);
     return 0;
 }
 
