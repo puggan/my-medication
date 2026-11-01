@@ -326,7 +326,8 @@ function describe(event: OverviewEvent): (Node | string)[] {
 function eventButton(event: OverviewEvent, today: string): HTMLElement {
     switch (event.action) {
         case 'refill':
-            return h('button', { disabled: event.actionDate > today, onclick: (() => refillDialog(event)) as EventListener }, 'Refill');
+            // Possible once a container is free, which can be well before it is due
+            return h('button', { disabled: event.availableFrom > today, onclick: (() => refillDialog(event)) as EventListener }, 'Refill');
         case 'pickup':
         case 'pickup-before-expiry':
             return h('button', { onclick: (() => pickupDialog(medication(event.medicationId))) as EventListener }, 'Pick up');

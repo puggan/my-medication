@@ -1,4 +1,4 @@
-import { addDays, listedEvents, plan, zeroDoseSince, type PlanInput } from '@med/core';
+import { addDays, listedEvents, plan, refillAmount, zeroDoseSince, type PlanInput } from '@med/core';
 import type { Overview, OverviewEvent } from './types.ts';
 
 export type { Overview, OverviewEvent, OverviewMedication } from './types.ts';
@@ -18,25 +18,29 @@ export function overview(input: PlanInput, userName: string): Overview {
 
     for (const event of listedEvents(events, input.today, LIST_DAYS)) {
         if (event.action === 'refill') {
-            // One row per organizer, as it is filled in one go
+            // One row per organizer, as it is filled in one go: due when its first medication runs
+            // empty, and possible once any of them has a container free
             for (const [organizerId, amount] of event.refill!) {
                 const box = input.organizers.find((o) => o.id === organizerId)!;
+                const due = event.due!.get(organizerId)!;
                 const row = refills.get(organizerId) ?? {
                     action: 'refill' as const,
                     organizerId,
                     organizerName: box.name,
-                    actionDate: event.actionDate,
-                    runsOut: event.runsOut,
+                    actionDate: due,
+                    availableFrom: event.availableFrom!,
+                    runsOut: addDays(due, 1),
                     items: [],
                 };
-                if (event.actionDate < row.actionDate) row.actionDate = event.actionDate;
-                const status = statuses.find((s) => s.medication.id === event.medicationId)!;
-                const perDay = status.doses.get(organizerId) ?? 0;
-                if (perDay > 0) {
-                    const emptyOn = addDays(input.today, Math.max(0, Math.floor((status.stock.tier1.get(organizerId) ?? 0) / perDay)) + 1);
-                    if (emptyOn < row.runsOut) row.runsOut = emptyOn;
+                if (due < row.actionDate) {
+                    row.actionDate = due;
+                    row.runsOut = addDays(due, 1);
                 }
-                row.items.push({ medicationId: event.medicationId, name: event.medicationName, tablets: tablets(amount) });
+                if (event.availableFrom! < row.availableFrom) row.availableFrom = event.availableFrom!;
+                // Once it can be refilled, show what a refill today moves; before that, the planned amount
+                const medication = input.medications.find((m) => m.id === event.medicationId)!;
+                const now = event.availableFrom! <= input.today ? refillAmount(input, medication, organizerId, input.today) : amount;
+                row.items.push({ medicationId: event.medicationId, name: event.medicationName, tablets: tablets(now) });
                 refills.set(organizerId, row);
             }
         } else {

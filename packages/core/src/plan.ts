@@ -80,6 +80,13 @@ export interface PlanEvent {
     runsOut: string;
     /** refill: tablets per organizer id. */
     refill?: Map<number, Hundredths>;
+    /**
+     * refill: the last day each organizer id still has tablets, the evening it must be refilled;
+     * actionDate is the earliest of them.
+     */
+    due?: Map<number, string>;
+    /** refill: the first refill day with a container free, from when the refill can be done. */
+    availableFrom?: string;
     /** pickup: packages of the default size. */
     packages?: number;
     /** pickup: nothing is left to pick up, so it waits for the new prescription. */
@@ -151,6 +158,17 @@ export function zeroDoseSince(medication: PlanMedication, date: string): string 
     return [...latest.values()].reduce((last, dose) => (dose.startDate > last ? dose.startDate : last), '');
 }
 
+/**
+ * Tablets that top one organizer up to full at the end of date, from the recorded transfers: what a
+ * refill done that day moves, early or on time.
+ */
+export function refillAmount(input: PlanInput, medication: PlanMedication, organizerId: number, date: string): Hundredths {
+    const meds = new MedicationPlan(input, medication);
+    const box = input.organizers.find((o) => o.id === organizerId);
+    if (!box) throw new Error(`No organizer ${organizerId}`);
+    return meds.fillUp(meds.history(date), box, date);
+}
+
 /** Stock of one medication at the end of date, from the recorded transfers alone. */
 export function stockAt(input: PlanInput, medication: PlanMedication, date: string): Stock {
     return new MedicationPlan(input, medication).history(date);
@@ -202,7 +220,7 @@ class MedicationPlan {
             // Today's refill isn't overdue yet; the projection handles it
             if (date >= until || weekday(date) !== this.input.refillWeekday) continue;
             for (const box of this.organizers) {
-                if (!this.overdueRefill.has(box.id) && this.refillNeed(stock, box, date) !== undefined) {
+                if (!this.overdueRefill.has(box.id) && this.canRefill(stock, box, date)) {
                     this.overdueRefill.set(box.id, date);
                 }
             }
@@ -216,18 +234,20 @@ class MedicationPlan {
         }
     }
 
-    /**
-     * Tablets to top an organizer up to full at the end of date, when a container's room is free;
-     * undefined when it isn't due.
-     */
-    private refillNeed(stock: Stock, box: PlanOrganizer, date: string): Hundredths | undefined {
+    /** Whether an organizer has a container's room free at the end of date, so it can be refilled. */
+    private canRefill(stock: Stock, box: PlanOrganizer, date: string): boolean {
         const perDay = this.dose(box.id, addDays(date, 1));
-        if (perDay === 0) return undefined;
-        const held = stock.tier1.get(box.id) ?? 0;
-        if (held > (box.containers - 1) * box.containerDays * perDay) return undefined;
+        return perDay > 0 && (stock.tier1.get(box.id) ?? 0) <= (box.containers - 1) * box.containerDays * perDay;
+    }
+
+    /**
+     * Tablets that top an organizer up to full at the end of date. Below 0 it is just empty: the
+     * missing doses were never in it, so a count should settle them, not the refill.
+     */
+    fillUp(stock: Stock, box: PlanOrganizer, date: string): Hundredths {
         let full = 0;
         for (let day = 1; day <= box.containers * box.containerDays; day++) full += this.dose(box.id, addDays(date, day));
-        return Math.max(0, full - held);
+        return Math.max(0, full - Math.max(0, stock.tier1.get(box.id) ?? 0));
     }
 
     project(stock: Stock): PlanEvent[] {
@@ -235,7 +255,10 @@ class MedicationPlan {
         const { id: medicationId, name: medicationName, packageSize } = this.medication;
         const pkg = packageSize * 100;
         const events: PlanEvent[] = [];
-        let refillShown = false;
+        /** Organizers whose next refill is already an event; later ones follow from it. */
+        const refillShown = new Set<number>();
+        /** First refill day an organizer had a container free, starting with ones skipped before today. */
+        const available = new Map(this.overdueRefill);
         const home = () => [...stock.tier1.values()].reduce((sum, n) => sum + n, stock.tier2);
         const runsOut = (date: string, tablets: Hundredths, perDay: Hundredths) =>
             addDays(date, Math.max(0, Math.floor(tablets / perDay)) + 1);
@@ -264,11 +287,19 @@ class MedicationPlan {
                 });
             }
 
-            if (weekday(date) !== refillWeekday) continue;
+            // A refill can be done from the first refill day with a container free, but is planned for
+            // the last day an organizer still has tablets, topping it up to full
+            if (weekday(date) === refillWeekday) {
+                for (const box of this.organizers) {
+                    if (!refillShown.has(box.id) && !available.has(box.id) && this.canRefill(stock, box, date)) {
+                        available.set(box.id, date);
+                    }
+                }
+            }
             const needs = new Map<number, Hundredths>();
             for (const box of this.organizers) {
-                const need = this.refillNeed(stock, box, date);
-                if (need !== undefined && need > 0) needs.set(box.id, need);
+                const next = this.dose(box.id, addDays(date, 1));
+                if (next > 0 && (stock.tier1.get(box.id) ?? 0) < next) needs.set(box.id, this.fillUp(stock, box, date));
             }
             const total = [...needs.values()].reduce((sum, n) => sum + n, 0);
             if (total === 0) continue;
@@ -316,27 +347,35 @@ class MedicationPlan {
                 }
             }
 
-            // The first refill may be overdue: it was due on an earlier refill day and never done
-            let actionDate = date;
-            let emptyOn: string | undefined;
+            // Due today, or in the past when the organizer already ran empty before today
+            let availableFrom = date;
+            const due = new Map<number, string>();
+            const shown = new Map<number, Hundredths>();
             for (const [boxId, need] of needs) {
-                const overdue = refillShown ? undefined : this.overdueRefill.get(boxId);
-                if (overdue !== undefined && overdue < actionDate) actionDate = overdue;
-                const boxEmpty = runsOut(date, stock.tier1.get(boxId) ?? 0, this.dose(boxId, addDays(date, 1)));
-                if (emptyOn === undefined || boxEmpty < emptyOn) emptyOn = boxEmpty;
+                const held = stock.tier1.get(boxId) ?? 0;
+                if (!refillShown.has(boxId)) {
+                    const from = available.get(boxId);
+                    if (from !== undefined && from < availableFrom) availableFrom = from;
+                    due.set(boxId, addDays(date, Math.floor(held / this.dose(boxId, addDays(date, 1)))));
+                    shown.set(boxId, need);
+                    refillShown.add(boxId);
+                }
                 stock.tier2 -= need;
-                stock.tier1.set(boxId, (stock.tier1.get(boxId) ?? 0) + need);
+                stock.tier1.set(boxId, held + need);
             }
-            if (!refillShown) {
+            // Each organizer's next refill is listed, also when it comes later than another's
+            if (shown.size > 0) {
+                const actionDate = [...due.values()].reduce((a, b) => (a < b ? a : b));
                 events.push({
                     action: 'refill',
                     medicationId,
                     medicationName,
                     actionDate,
-                    runsOut: emptyOn!,
-                    refill: needs,
+                    runsOut: addDays(actionDate, 1),
+                    refill: shown,
+                    due,
+                    availableFrom,
                 });
-                refillShown = true;
             }
         }
         return events;

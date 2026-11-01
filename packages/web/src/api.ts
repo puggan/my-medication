@@ -9,6 +9,7 @@ import {
     recordPickup,
     recordRefill,
     recordRenew,
+    refillAmount,
     today,
 } from '@med/core';
 import { medication, organizer, type Db, type Tx, type User } from '@med/db';
@@ -155,15 +156,22 @@ export function api(db: Db) {
         const date = today();
         const count = await db.transaction(async (tx) => {
             const box = await ownOrganizer(tx, owner, input.organizerId);
-            const due = plan(await loadPlanInput(tx, owner, date)).events.filter(
-                (event) => event.action === 'refill' && event.actionDate <= date && event.refill!.has(box.id),
+            const planInput = await loadPlanInput(tx, owner, date);
+            const due = plan(planInput).events.filter(
+                (event) => event.action === 'refill' && event.availableFrom! <= date && event.refill!.has(box.id),
             );
-            if (due.length === 0) throw new InputError(`No refill of ${box.name} is due today`);
+            if (due.length === 0) throw new InputError(`The ${box.name} organizer has no free container to refill yet`);
+            // Top up to full from what it holds today, which is less than planned when done early
+            let refilled = 0;
             for (const event of due) {
                 const med = await ownMedication(tx, owner, event.medicationId);
-                await recordRefill(tx, owner, med, { amounts: new Map([[box.id, event.refill!.get(box.id)!]]), date });
+                const planned = planInput.medications.find((m) => m.id === med.id)!;
+                const amount = refillAmount(planInput, planned, box.id, date);
+                if (amount <= 0) continue;
+                await recordRefill(tx, owner, med, { amounts: new Map([[box.id, amount]]), date });
+                refilled++;
             }
-            return due.length;
+            return refilled;
         });
         return c.json({ ok: true, medications: count });
     });
