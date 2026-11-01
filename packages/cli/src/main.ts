@@ -74,13 +74,15 @@ const USAGE = `Usage:
       every organizer or only --organizer, with the amounts med events suggests. --tablets with a
       <name> records one other amount instead.
 
-  med pickup <name> [--packages 1] [--package-size <tablets>] [--price <kr per package>] [--date YYYY-MM-DD]
+  med pickup <name> [--packages 1] [--package-size <tablets>] [--price <kr per package>] [--product <name>]
+           [--date YYYY-MM-DD]
       Packages picked up at the pharmacy; the package size defaults to the medication's. --price
-      also adds the price per package to the price history.
+      also adds the price per package to the price history, with --product as sold.
 
   med price list [<name>]
-  med price add <name> <kr per package> [--package-size <tablets>] [--date YYYY-MM-DD]
-      Price history in SEK, e.g. from receipts of pickups made before tracking started.
+  med price add <name> <kr per package> [--product <name>] [--package-size <tablets>] [--date YYYY-MM-DD]
+      Price history in SEK, e.g. from receipts of pickups made before tracking started; --product
+      is the brand and strength as sold, e.g. "Glimepirid Actavis 1mg".
 
   med renew <name> <tablets> --expires YYYY-MM-DD [--package-size <tablets>] [--date YYYY-MM-DD] [--note <text>]
       A prescription adding tablets to tier 3 on --date (default today), usable until --expires.
@@ -134,6 +136,7 @@ const { positionals, values } = parseArgs({
         tablets: { type: 'string' },
         packages: { type: 'string', default: '1' },
         drop: { type: 'boolean', default: false },
+        product: { type: 'string' },
         'dry-run': { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h' },
     },
@@ -398,7 +401,14 @@ async function runPickup(db: Db, [name]: string[]): Promise<number> {
         const med = await findMedication(tx, owner, name!);
         const packageSize =
             values['package-size'] === undefined ? med.packageSize : parsePositiveInt('--package-size', values['package-size']);
-        await recordPickup(tx, owner, med, { packages, packageSize, pricePerPackage, date, note: values.note });
+        await recordPickup(tx, owner, med, {
+            packages,
+            packageSize,
+            pricePerPackage,
+            product: values.product,
+            date,
+            note: values.note,
+        });
         return packageSize;
     });
     const paid = pricePerPackage === undefined ? '' : `, ${pricePerPackage} SEK per package`;
@@ -414,7 +424,7 @@ async function runPriceList(db: Db, [name]: string[]): Promise<number> {
         const source = row.transferId === null ? '' : `  (pickup #${row.transferId})`;
         console.log(
             `${row.date}  ${row.name.padEnd(14)}  ${row.pricePerPackage.padStart(9)} ${row.currency} / ${row.packageSize}` +
-                `  = ${perTablet} per tablet${source}`,
+                `  = ${perTablet} per tablet  ${row.product ?? ''}${source}`.trimEnd(),
         );
     }
     return 0;
@@ -428,10 +438,11 @@ async function runPriceAdd(db: Db, [name, amount]: string[]): Promise<number> {
         const med = await findMedication(tx, owner, name!);
         const packageSize =
             values['package-size'] === undefined ? med.packageSize : parsePositiveInt('--package-size', values['package-size']);
-        await recordPrice(tx, owner, med, { packageSize, pricePerPackage, date });
+        await recordPrice(tx, owner, med, { packageSize, pricePerPackage, product: values.product, date });
         return packageSize;
     });
-    console.log(`${mark} ${name}: ${pricePerPackage} SEK per package of ${size} on ${date}`);
+    const product = values.product === undefined ? '' : ` (${values.product})`;
+    console.log(`${mark} ${name}${product}: ${pricePerPackage} SEK per package of ${size} on ${date}`);
     return 0;
 }
 

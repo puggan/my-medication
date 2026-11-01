@@ -233,6 +233,8 @@ export const price = mysqlTable(
         medicationId: int({ unsigned: true }).notNull(),
         transferId: int({ unsigned: true }),
         date: day().notNull(),
+        /** Brand and strength as sold, e.g. "Glimepirid Actavis 1mg". */
+        product: varchar({ length: 128 }),
         packageSize: smallint({ unsigned: true }).notNull(),
         pricePerPackage: money().notNull(),
         currency: char({ length: 3, enum: currencies }).notNull().default('SEK'),

@@ -35,7 +35,7 @@ export async function recordPickup(
     tx: Tx,
     owner: User,
     med: Medication,
-    values: { packages: number; packageSize: number; pricePerPackage?: string; date: string; note?: string },
+    values: { packages: number; packageSize: number; pricePerPackage?: string; product?: string; date: string; note?: string },
 ): Promise<void> {
     if (!Number.isInteger(values.packages) || values.packages < 1) throw new Error('Pick up at least one package');
     if (!Number.isInteger(values.packageSize) || values.packageSize < 1) throw new Error('A package holds at least one tablet');
@@ -53,6 +53,7 @@ export async function recordPickup(
         await recordPrice(tx, owner, med, {
             packageSize: values.packageSize,
             pricePerPackage: values.pricePerPackage,
+            product: values.product,
             date: values.date,
             transferId: id,
         });
@@ -64,7 +65,7 @@ export async function recordPrice(
     tx: Tx,
     owner: User,
     med: Medication,
-    values: { packageSize: number; pricePerPackage: string; date: string; transferId?: number },
+    values: { packageSize: number; pricePerPackage: string; product?: string; date: string; transferId?: number },
 ): Promise<void> {
     if (!/^\d+(\.\d{1,2})?$/.test(values.pricePerPackage)) throw new Error('A price is an amount like 125 or 125.50');
     if (!Number.isInteger(values.packageSize) || values.packageSize < 1) throw new Error('A package holds at least one tablet');
@@ -72,6 +73,7 @@ export async function recordPrice(
         medicationId: med.id,
         transferId: values.transferId,
         date: values.date,
+        product: values.product?.trim() || undefined,
         packageSize: values.packageSize,
         pricePerPackage: values.pricePerPackage,
         createdBy: owner.id,
