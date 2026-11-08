@@ -1,4 +1,4 @@
-import { addDays, listedEvents, plan, refillAmount, zeroDoseSince, type PlanInput } from '@med/core';
+import { addDays, listedEvents, organizerFill, plan, refillAmount, zeroDoseSince, type PlanInput } from '@med/core';
 import type { Overview, OverviewEvent } from './types.ts';
 
 export type { Overview, OverviewEvent, OverviewMedication } from './types.ts';
@@ -55,6 +55,14 @@ export function overview(input: PlanInput, userName: string): Overview {
                 expiresOn: event.expiresOn,
             });
         }
+    }
+    // An organizer that can be refilled now is refilled by days, every medication up to the same day
+    for (const row of refills.values()) {
+        if (row.availableFrom > input.today) continue;
+        const fill = organizerFill(input, row.organizerId, input.today);
+        if (fill.maxDays === 0) continue;
+        row.fill = { filledUntil: fill.filledUntil, maxDays: fill.maxDays };
+        for (const item of row.items) item.byDays = fill.amounts.get(item.medicationId)?.map(tablets);
     }
     listed.push(...[...refills.values()].filter((row) => row.actionDate <= until));
     listed.sort((a, b) => a.actionDate.localeCompare(b.actionDate) || (a.action === 'refill' ? -1 : 1));

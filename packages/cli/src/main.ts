@@ -1,6 +1,7 @@
 #!/usr/bin/env -S node --import tsx
 import { parseArgs } from 'node:util';
 import {
+    addDays,
     formatTablets,
     fromDecimal,
     listedEvents,
@@ -11,6 +12,7 @@ import {
     recordPickup,
     recordPrice,
     recordRefill,
+    organizerFill,
     recordRenew,
     refillAmount,
 } from '@med/core';
@@ -73,10 +75,11 @@ const USAGE = `Usage:
       Change the dose in --organizer from --from (default today) on. 0 ends the medication there;
       a medication taken morning and evening has a dose in both organizers.
 
-  med refill [<name>] [--organizer <name>] [--date YYYY-MM-DD]
+  med refill [<name>] [--organizer <name>] [--days <n>] [--date YYYY-MM-DD]
       Record the refills that can be done by --date (default today), a container being free, of
       every medication or only <name>, in every organizer or only --organizer, topping each up to
-      full from what it holds that day. --tablets with a <name> records one other amount instead.
+      full from what it holds that day. --days fills the organizer n more days instead, every
+      medication up to the same day. --tablets with a <name> records one other amount instead.
       med events lists a refill on the last day the organizer still has tablets.
 
   med pickup <name> [--packages 1] [--package-size <tablets>] [--price <kr per package>] [--product <name>]
@@ -140,7 +143,7 @@ const { positionals, values } = parseArgs({
         price: { type: 'string' },
         note: { type: 'string' },
         expires: { type: 'string' },
-        days: { type: 'string', default: '60' },
+        days: { type: 'string' },
         tablets: { type: 'string' },
         packages: { type: 'string', default: '1' },
         drop: { type: 'boolean', default: false },
@@ -212,7 +215,7 @@ async function runStock(db: Db): Promise<number> {
 
 async function runEvents(db: Db): Promise<number> {
     const input = await loadPlanInput(db, await findUser(db, values.user), values.date && parseDate('--date', values.date));
-    const events = listedEvents(plan(input).events, input.today, parsePositiveInt('--days', values.days));
+    const events = listedEvents(plan(input).events, input.today, parsePositiveInt('--days', values.days ?? '60'));
     for (const line of eventTable(events, input.organizers, input.today)) console.log(line);
     return 0;
 }
@@ -373,7 +376,14 @@ async function runRefill(db: Db, [name]: string[]): Promise<number> {
             return [`${name}: ${formatTablets(tablets)} ${box.name}`];
         }
         const input = await loadPlanInput(tx, owner, date);
-        const only = values.organizer === undefined ? undefined : await findOrganizer(tx, owner, values.organizer);
+        // --days fills one organizer by days, every medication up to the same day
+        const only =
+            values.organizer !== undefined || values.days !== undefined
+                ? await findOrganizer(tx, owner, values.organizer)
+                : undefined;
+        const fill = values.days === undefined ? undefined : organizerFill(input, only!.id, date);
+        const days = values.days === undefined ? undefined : parsePositiveInt('--days', values.days);
+        if (fill && days! > fill.maxDays) throw new Error(`Only ${fill.maxDays} days fit in the ${only!.name} organizer`);
         const due = plan(input)
             .events.filter(
                 (event) =>
@@ -386,7 +396,12 @@ async function runRefill(db: Db, [name]: string[]): Promise<number> {
                 return {
                     name: event.medicationName,
                     amounts: new Map(
-                        boxes.map((id) => [id, refillAmount(input, planned, id, date)] as const).filter(([, n]) => n > 0),
+                        boxes
+                            .map((id) => {
+                                const amount = fill ? (fill.amounts.get(planned.id)?.[days! - 1] ?? 0) : refillAmount(input, planned, id, date);
+                                return [id, amount] as const;
+                            })
+                            .filter(([, n]) => n > 0),
                     ),
                 };
             })
@@ -401,9 +416,14 @@ async function runRefill(db: Db, [name]: string[]): Promise<number> {
             );
             lines.push(`${event.name}: ${amounts.join(' + ')}`);
         }
-        return lines;
+        return { lines, filled: fill && `${only!.name} organizer filled until ${addDays(fill.filledUntil, days!)}` };
     });
-    for (const line of done) console.log(`${mark} Refilled ${line} on ${date}`);
+    if (Array.isArray(done)) {
+        for (const line of done) console.log(`${mark} Refilled ${line} on ${date}`);
+    } else {
+        for (const line of done.lines) console.log(`${mark} Refilled ${line} on ${date}`);
+        if (done.filled) console.log(`  ${done.filled}`);
+    }
     return 0;
 }
 

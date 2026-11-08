@@ -1,4 +1,4 @@
-import { addDays, weekday } from './dates.ts';
+import { addDays, daysBetween, weekday } from './dates.ts';
 import type { Hundredths } from './tablets.ts';
 
 /**
@@ -167,6 +167,49 @@ export function refillAmount(input: PlanInput, medication: PlanMedication, organ
     const box = input.organizers.find((o) => o.id === organizerId);
     if (!box) throw new Error(`No organizer ${organizerId}`);
     return meds.fillUp(meds.history(date), box, date);
+}
+
+export interface OrganizerFill {
+    /** The last day the organizer is filled for now: its first medication's last day, today at the earliest. */
+    filledUntil: string;
+    /** Days that fit: filling n of them fills it until filledUntil + n. */
+    maxDays: number;
+    /** Per medication id, the tablets for filling 1 … maxDays days (index n - 1). */
+    amounts: Map<number, Hundredths[]>;
+}
+
+/**
+ * How a refill of one organizer at the end of date can go, from the recorded transfers: by days,
+ * each medication up to the same last day, so the organizer's day slots end together.
+ */
+export function organizerFill(input: PlanInput, organizerId: number, date: string): OrganizerFill {
+    const box = input.organizers.find((o) => o.id === organizerId);
+    if (!box) throw new Error(`No organizer ${organizerId}`);
+    const held = new Map<number, { plan: MedicationPlan; tablets: Hundredths }>();
+    let filledUntil: string | undefined;
+    for (const medication of input.medications) {
+        const meds = new MedicationPlan(input, medication);
+        const perDay = meds.dose(organizerId, addDays(date, 1));
+        if (perDay === 0) continue;
+        const tablets = Math.max(0, meds.history(date).tier1.get(organizerId) ?? 0);
+        held.set(medication.id, { plan: meds, tablets });
+        const lastDay = addDays(date, Math.floor(tablets / perDay));
+        if (filledUntil === undefined || lastDay < filledUntil) filledUntil = lastDay;
+    }
+    if (filledUntil === undefined) return { filledUntil: date, maxDays: 0, amounts: new Map() };
+
+    const maxDays = Math.max(0, box.containers * box.containerDays - daysBetween(date, filledUntil));
+    const amounts = new Map<number, Hundredths[]>();
+    for (const [id, { plan: meds, tablets }] of held) {
+        const options: Hundredths[] = [];
+        let needed = 0;
+        for (let day = 1; day <= daysBetween(date, filledUntil) + maxDays; day++) {
+            needed += meds.dose(organizerId, addDays(date, day));
+            if (day > daysBetween(date, filledUntil)) options.push(Math.max(0, needed - tablets));
+        }
+        amounts.set(id, options);
+    }
+    return { filledUntil, maxDays, amounts };
 }
 
 /** Stock of one medication at the end of date, from the recorded transfers alone. */

@@ -402,16 +402,56 @@ async function submit(status: HTMLElement, buttons: HTMLButtonElement[], work: (
 
 const cancelButton = () => h('button', { type: 'button', onclick: closeDialog as EventListener }, 'Cancel');
 
+/** 13/11 */
+function dayMonth(date: string): string {
+    const [, month, day] = date.split('-').map(Number);
+    return `${day}/${month}`;
+}
+
 function refillDialog(event: Extract<OverviewEvent, { action: 'refill' }>): void {
     const status = h('p', {});
     const confirm = h('button', { className: 'primary' }, 'Confirm refill');
+    const fill = event.fill;
+    // Filled by days when it can be: a choice of 1 up to the days that fit, the amounts following it
+    const until = (days: number) => {
+        const date = new Date(`${fill!.filledUntil}T00:00:00Z`);
+        date.setUTCDate(date.getUTCDate() + days);
+        return date.toISOString().slice(0, 10);
+    };
+    const select = fill
+        ? h(
+              'select',
+              { id: 'refill-days' },
+              ...Array.from({ length: fill.maxDays }, (_, i) =>
+                  h('option', { value: String(i + 1), selected: i + 1 === fill.maxDays }, `${plural(i + 1, 'day')}, until ${dayMonth(until(i + 1))}`),
+              ),
+          )
+        : undefined;
+    const list = h('ul', {});
+    const filled = h('p', { className: 'muted' });
+    const render = () => {
+        const days = select ? Number(select.value) : undefined;
+        list.replaceChildren(
+            ...event.items.map((item) =>
+                h('li', {}, `${item.name}: ${fmt(days === undefined ? item.tablets : (item.byDays?.[days - 1] ?? 0))}`),
+            ),
+        );
+        filled.textContent = days === undefined ? '' : `Filled until ${until(days)}.`;
+    };
+    select?.addEventListener('change', render);
+    render();
+
     confirm.addEventListener('click', async () => {
-        if (await submit(status, [confirm], () => post('/api/refill', { organizerId: event.organizerId }))) closeDialog();
+        const body = { organizerId: event.organizerId, days: select ? Number(select.value) : undefined };
+        if (await submit(status, [confirm], () => post('/api/refill', body))) closeDialog();
     });
     openDialog(
         `Refill the ${event.organizerName} organizer`,
+        select && h('label', { for: 'refill-days' }, 'Days to fill'),
+        select,
         h('p', {}, 'Moves these tablets from the cupboard (tier 2) into the organizer (tier 1):'),
-        h('ul', {}, ...event.items.map((item) => h('li', {}, `${item.name}: ${fmt(item.tablets)}`))),
+        list,
+        filled,
         status,
         h('div', { className: 'actions' }, cancelButton(), confirm),
     );

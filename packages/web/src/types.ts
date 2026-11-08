@@ -25,8 +25,11 @@ export type OverviewEvent =
           actionDate: string;
           /** From when it can be refilled, a container being free. */
           availableFrom: string;
+          /** Once it can be refilled: refilling n days fills it until filledUntil + n, n up to maxDays. */
+          fill?: { filledUntil: string; maxDays: number };
           runsOut: string;
-          items: { medicationId: number; name: string; tablets: number }[];
+          /** tablets is a full refill; with fill, byDays[n - 1] is the amount for n days. */
+          items: { medicationId: number; name: string; tablets: number; byDays?: number[] }[];
       }
     | {
           action: 'pickup' | 'pickup-before-expiry' | 'contact-doctor';

@@ -9,6 +9,7 @@ import {
     recordPickup,
     recordRefill,
     recordRenew,
+    organizerFill,
     refillAmount,
     today,
 } from '@med/core';
@@ -161,12 +162,20 @@ export function api(db: Db) {
                 (event) => event.action === 'refill' && event.availableFrom! <= date && event.refill!.has(box.id),
             );
             if (due.length === 0) throw new InputError(`The ${box.name} organizer has no free container to refill yet`);
-            // Top up to full from what it holds today, which is less than planned when done early
+            // By days when asked, every medication up to the same day; otherwise up to full
+            const fill = organizerFill(planInput, box.id, date);
+            const days = input.days === undefined ? undefined : positiveInt('days', input.days);
+            if (days !== undefined && days > fill.maxDays) {
+                throw new InputError(`Only ${fill.maxDays} days fit in the ${box.name} organizer`);
+            }
             let refilled = 0;
             for (const event of due) {
                 const med = await ownMedication(tx, owner, event.medicationId);
                 const planned = planInput.medications.find((m) => m.id === med.id)!;
-                const amount = refillAmount(planInput, planned, box.id, date);
+                const amount =
+                    days === undefined
+                        ? refillAmount(planInput, planned, box.id, date)
+                        : (fill.amounts.get(med.id)?.[days - 1] ?? 0);
                 if (amount <= 0) continue;
                 await recordRefill(tx, owner, med, { amounts: new Map([[box.id, amount]]), date });
                 refilled++;
