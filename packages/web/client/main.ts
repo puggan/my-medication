@@ -347,7 +347,8 @@ function eventTable(data: Overview): HTMLElement {
             h(
                 'thead',
                 {},
-                h('tr', {}, h('th', {}, 'Action date'), h('th', {}, 'Action'), h('th', {}, 'Runs out'), h('th', {}, '')),
+                // The button right after the date, so it isn't read as belonging to the runs-out date
+                h('tr', {}, h('th', {}, 'Action date'), h('th', {}, ''), h('th', {}, 'Action'), h('th', {}, 'Runs out')),
             ),
             h(
                 'tbody',
@@ -357,9 +358,9 @@ function eventTable(data: Overview): HTMLElement {
                         'tr',
                         {},
                         h('td', {}, event.actionDate, h('div', {}, whenBadge(data.today, event.actionDate))),
+                        h('td', {}, eventButton(event, data.today)),
                         h('td', { className: 'wrap' }, ...describe(event)),
                         h('td', {}, event.runsOut),
-                        h('td', {}, eventButton(event, data.today)),
                     ),
                 ),
             ),
