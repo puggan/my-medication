@@ -39,8 +39,9 @@ export const tiers = [1, 2, 3] as const;
 export type Tier = (typeof tiers)[number];
 
 /**
- * Person whose medications are tracked, and who logs in on the web. refillWeekday is no longer used:
- * organizers can be refilled whenever a day's room is free.
+ * Person whose medications are tracked, and who logs in on the web. Organizers can be refilled
+ * whenever a day's room is free; pickups are planned so the cupboard manages a top-up every
+ * refillWeekday (0 = Sunday).
  */
 export const user = mysqlTable('user', {
     id: int({ unsigned: true }).autoincrement().primaryKey(),
