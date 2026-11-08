@@ -560,7 +560,8 @@ function countDialog(med: OverviewMedication): void {
         { label: 'Cupboard', tier: 2, organizerId: undefined },
         { label: 'Pharmacy', tier: 3, organizerId: undefined },
     ];
-    let place = places[0]!;
+    // The cupboard is what gets counted most; organizers are easy to see at a glance
+    let place = places.find((p) => p.tier === 2)!;
     const calculated = h('p', { className: 'muted' });
     const counted = numberInput('count-tablets', '', { min: '0', step: 'any', inputmode: 'decimal' });
     const status = h('p', {});
@@ -607,14 +608,14 @@ function countDialog(med: OverviewMedication): void {
         h(
             'div',
             { className: 'choices' },
-            ...places.map((p, i) =>
+            ...places.map((p) =>
                 h(
                     'label',
                     {},
                     h('input', {
                         type: 'radio',
                         name: 'count-place',
-                        checked: i === 0,
+                        checked: p === place,
                         onchange: (() => {
                             place = p;
                             void loadExpected();
