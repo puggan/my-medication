@@ -38,7 +38,10 @@ const createdAt = () => timestamp().notNull().default(sql`CURRENT_TIMESTAMP`);
 export const tiers = [1, 2, 3] as const;
 export type Tier = (typeof tiers)[number];
 
-/** Person whose medications are tracked, and who logs in on the web. Organizers are refilled on refillWeekday (0 = Sunday). */
+/**
+ * Person whose medications are tracked, and who logs in on the web. refillWeekday is no longer used:
+ * organizers can be refilled whenever a day's room is free.
+ */
 export const user = mysqlTable('user', {
     id: int({ unsigned: true }).autoincrement().primaryKey(),
     name: varchar({ length: 64 }).notNull().unique('user_name'),

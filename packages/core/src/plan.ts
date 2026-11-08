@@ -1,4 +1,4 @@
-import { addDays, daysBetween, weekday } from './dates.ts';
+import { addDays, daysBetween } from './dates.ts';
 import type { Hundredths } from './tablets.ts';
 
 /**
@@ -48,7 +48,6 @@ export interface PlanMedication {
 
 export interface PlanInput {
     today: string;
-    refillWeekday: number;
     pickupWarningDays: number;
     renewalLeadDays: number;
     organizers: PlanOrganizer[];
@@ -85,7 +84,7 @@ export interface PlanEvent {
      * actionDate is the earliest of them.
      */
     due?: Map<number, string>;
-    /** refill: the first refill day with a container free, from when the refill can be done. */
+    /** refill: the first day at least one day fits, from when the refill can be done. */
     availableFrom?: string;
     /** pickup: packages of the default size. */
     packages?: number;
@@ -219,7 +218,7 @@ export function stockAt(input: PlanInput, medication: PlanMedication, date: stri
 
 class MedicationPlan {
     private readonly organizers: PlanOrganizer[];
-    /** First refill weekday per organizer that was due but not done, found by history(). */
+    /** First day before today each organizer had room for a refill since its last one, found by history(). */
     private overdueRefill = new Map<number, string>();
 
     constructor(
@@ -260,8 +259,8 @@ class MedicationPlan {
                 apply(stock, transfer);
                 if (transfer.kind === 'refill') this.overdueRefill.delete(transfer.organizerId!);
             }
-            // Today's refill isn't overdue yet; the projection handles it
-            if (date >= until || weekday(date) !== this.input.refillWeekday) continue;
+            // From today on the projection tracks it
+            if (date >= until) continue;
             for (const box of this.organizers) {
                 if (!this.overdueRefill.has(box.id) && this.canRefill(stock, box, date)) {
                     this.overdueRefill.set(box.id, date);
@@ -277,10 +276,10 @@ class MedicationPlan {
         }
     }
 
-    /** Whether an organizer has a container's room free at the end of date, so it can be refilled. */
+    /** Whether at least one more day fits in an organizer at the end of date, so it can be refilled. */
     private canRefill(stock: Stock, box: PlanOrganizer, date: string): boolean {
         const perDay = this.dose(box.id, addDays(date, 1));
-        return perDay > 0 && (stock.tier1.get(box.id) ?? 0) <= (box.containers - 1) * box.containerDays * perDay;
+        return perDay > 0 && (stock.tier1.get(box.id) ?? 0) <= (box.containers * box.containerDays - 1) * perDay;
     }
 
     /**
@@ -294,13 +293,13 @@ class MedicationPlan {
     }
 
     project(stock: Stock): PlanEvent[] {
-        const { today, refillWeekday, pickupWarningDays, renewalLeadDays } = this.input;
+        const { today, pickupWarningDays, renewalLeadDays } = this.input;
         const { id: medicationId, name: medicationName, packageSize } = this.medication;
         const pkg = packageSize * 100;
         const events: PlanEvent[] = [];
         /** Organizers whose next refill is already an event; later ones follow from it. */
         const refillShown = new Set<number>();
-        /** First refill day an organizer had a container free, starting with ones skipped before today. */
+        /** First day an organizer had room for a refill, starting with days before today. */
         const available = new Map(this.overdueRefill);
         const home = () => [...stock.tier1.values()].reduce((sum, n) => sum + n, stock.tier2);
         const runsOut = (date: string, tablets: Hundredths, perDay: Hundredths) =>
@@ -330,13 +329,11 @@ class MedicationPlan {
                 });
             }
 
-            // A refill can be done from the first refill day with a container free, but is planned for
-            // the last day an organizer still has tablets, topping it up to full
-            if (weekday(date) === refillWeekday) {
-                for (const box of this.organizers) {
-                    if (!refillShown.has(box.id) && !available.has(box.id) && this.canRefill(stock, box, date)) {
-                        available.set(box.id, date);
-                    }
+            // A refill can be done from the first day a day's room is free, but is planned for the last
+            // day an organizer still has tablets, topping it up to full
+            for (const box of this.organizers) {
+                if (!refillShown.has(box.id) && !available.has(box.id) && this.canRefill(stock, box, date)) {
+                    available.set(box.id, date);
                 }
             }
             const needs = new Map<number, Hundredths>();

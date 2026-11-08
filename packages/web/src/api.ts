@@ -161,7 +161,7 @@ export function api(db: Db) {
             const due = plan(planInput).events.filter(
                 (event) => event.action === 'refill' && event.availableFrom! <= date && event.refill!.has(box.id),
             );
-            if (due.length === 0) throw new InputError(`The ${box.name} organizer has no free container to refill yet`);
+            if (due.length === 0) throw new InputError(`The ${box.name} organizer is full`);
             // By days when asked, every medication up to the same day; otherwise up to full
             const fill = organizerFill(planInput, box.id, date);
             const days = input.days === undefined ? undefined : positiveInt('days', input.days);

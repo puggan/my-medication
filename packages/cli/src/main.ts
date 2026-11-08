@@ -76,7 +76,7 @@ const USAGE = `Usage:
       a medication taken morning and evening has a dose in both organizers.
 
   med refill [<name>] [--organizer <name>] [--days <n>] [--date YYYY-MM-DD]
-      Record the refills that can be done by --date (default today), a container being free, of
+      Record the refills that can be done by --date (default today), a day's room being free, of
       every medication or only <name>, in every organizer or only --organizer, topping each up to
       full from what it holds that day. --days fills the organizer n more days instead, every
       medication up to the same day. --tablets with a <name> records one other amount instead.
