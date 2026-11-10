@@ -49,7 +49,10 @@ export const user = mysqlTable('user', {
     refillWeekday: tinyint({ unsigned: true }).notNull().default(0),
     /** How long before a refill a short cupboard is warned about (Sunday refill, Wednesday warning). */
     pickupWarningDays: tinyint({ unsigned: true }).notNull().default(4),
-    /** How long renewing a prescription can take, from contacting the doctor until pickup. */
+    /**
+     * How long before a medication runs out to contact the doctor for a new prescription; renewing
+     * takes days, but a month's stock in hand is recommended.
+     */
     renewalLeadDays: tinyint({ unsigned: true }).notNull().default(30),
     createdAt: createdAt(),
 }, () => [check('user_refill_weekday', sql`refill_weekday BETWEEN 0 AND 6`)]);

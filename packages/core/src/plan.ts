@@ -388,9 +388,10 @@ class MedicationPlan {
                     });
                 }
                 if (stock.tier2 < total) {
-                    // Nothing left to pick up: a new prescription has to be ready by the pickup warning,
-                    // and the pickup still happens then, from the new prescription
+                    // Nothing left to pick up: the pickup still happens then, from a new prescription,
+                    // which is ordered a lead time before the medication runs out
                     const expired = stock.lots.find((lot) => lot.expiresOn < date && pickablePackages(lot.tablets, pkg) > 0);
+                    const emptyOn = runsOut(date, home(), perDay);
                     events.push({
                         action: 'pickup',
                         medicationId,
@@ -404,8 +405,8 @@ class MedicationPlan {
                         action: 'contact-doctor',
                         medicationId,
                         medicationName,
-                        actionDate: addDays(date, -pickupWarningDays - renewalLeadDays),
-                        runsOut: runsOut(date, home(), perDay),
+                        actionDate: addDays(emptyOn, -renewalLeadDays),
+                        runsOut: emptyOn,
                         expiresOn: expired?.expiresOn,
                     });
                     break;
