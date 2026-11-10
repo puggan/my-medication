@@ -7,6 +7,8 @@ const dialog = document.getElementById('dialog') as HTMLDialogElement;
 type Me = { state: 'anonymous' } | { state: 'pending'; username: string; pairingCode: string } | { state: 'approved'; username: string };
 
 class Unauthorized extends Error {}
+/** The request never reached the server. */
+class NetworkError extends Error {}
 
 // ---- Helpers ----
 
@@ -35,6 +37,8 @@ async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown):
         headers: body === undefined ? {} : { 'content-type': 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body),
         credentials: 'same-origin',
+    }).catch(() => {
+        throw new NetworkError('No connection to the server');
     });
     const data = (await response.json().catch(() => ({}))) as T & { error?: string };
     if (response.status === 401) throw new Unauthorized(data.error ?? 'Not logged in');
@@ -76,6 +80,83 @@ function saveUsername(name: string): void {
     }
 }
 
+// ---- Unsent actions ----
+
+/**
+ * A write kept in localStorage until the server has answered it, so one interrupted by an ended
+ * session or a lost connection can be sent again after logging in.
+ */
+interface PendingAction {
+    path: string;
+    body: unknown;
+    /** What it does, for the question whether to send it again. */
+    label: string;
+    username: string;
+    /** When it was first tried, as an ISO timestamp. */
+    savedAt: string;
+}
+
+const PENDING_KEY = 'med-pending-action';
+/** Older unsent actions are dropped without asking. */
+const PENDING_DAYS = 7;
+
+function savePending(action: PendingAction): void {
+    try {
+        localStorage.setItem(PENDING_KEY, JSON.stringify(action));
+    } catch {
+        // Private mode or storage blocked: it just can't be offered again
+    }
+}
+
+function loadPending(): PendingAction | undefined {
+    try {
+        const raw = localStorage.getItem(PENDING_KEY);
+        return raw === null ? undefined : (JSON.parse(raw) as PendingAction);
+    } catch {
+        return undefined;
+    }
+}
+
+function clearPending(): void {
+    try {
+        localStorage.removeItem(PENDING_KEY);
+    } catch {
+        // Nothing to clear when storage is unavailable
+    }
+}
+
+/** Ask whether to send an action that didn't get through, for the user now logged in. */
+function offerPending(username: string, today: string): void {
+    const pending = loadPending();
+    if (!pending || pending.username !== username) return;
+    const saved = new Date(pending.savedAt);
+    if (Number.isNaN(saved.getTime()) || Date.now() - saved.getTime() > PENDING_DAYS * 86_400_000) {
+        clearPending();
+        return;
+    }
+    const savedDay = saved.toLocaleDateString('sv-SE');
+    const status = h('p', {});
+    const send = h('button', { className: 'primary' }, 'Send it now');
+    const discard = h('button', {}, 'Discard');
+    discard.addEventListener('click', () => {
+        clearPending();
+        closeDialog();
+    });
+    send.addEventListener('click', async () => {
+        if (await submit(status, [send, discard], pending)) closeDialog();
+    });
+    openDialog(
+        'Unsent action',
+        h('p', {}, 'This was not saved, as the session ended or the connection was lost:'),
+        h('p', {}, h('strong', {}, pending.label)),
+        h('p', { className: 'muted' }, `Tried ${savedDay} ${saved.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}.`),
+        savedDay !== today &&
+            h('p', { className: 'error' }, `Sent now, it is recorded as done today, ${today}, not ${savedDay}.`),
+        status,
+        h('div', { className: 'actions' }, discard, send),
+    );
+}
+
 // ---- Login ----
 
 let pollTimer: number | undefined;
@@ -86,7 +167,10 @@ async function refresh(): Promise<void> {
         const me = await get<Me>('/api/me');
         if (me.state === 'anonymous') renderLogin();
         else if (me.state === 'pending') renderPending(me.username, me.pairingCode);
-        else await renderOverview();
+        else {
+            await renderOverview();
+            offerPending(me.username, current!.today);
+        }
     } catch (error) {
         if (error instanceof Unauthorized) renderLogin();
         else renderLogin((error as Error).message);
@@ -379,23 +463,45 @@ function closeDialog(): void {
     dialog.close();
 }
 
-/** Run a write, then reload the overview; errors stay in the dialog. */
-async function submit(status: HTMLElement, buttons: HTMLButtonElement[], work: () => Promise<unknown>): Promise<boolean> {
+/**
+ * Send a write, then reload the overview; errors stay in the dialog. It is kept in localStorage
+ * until the server has answered, and offered again after logging in if the session ended or the
+ * connection was lost on the way.
+ */
+async function submit(
+    status: HTMLElement,
+    buttons: HTMLButtonElement[],
+    action: { path: string; body: unknown; label: string; savedAt?: string },
+): Promise<boolean> {
     for (const button of buttons) button.disabled = true;
     status.className = 'muted';
     status.textContent = 'Saving…';
+    savePending({
+        path: action.path,
+        body: action.body,
+        label: action.label,
+        username: current!.user,
+        savedAt: action.savedAt ?? new Date().toISOString(),
+    });
     try {
-        await work();
+        await post(action.path, action.body);
+        clearPending();
         await renderOverview();
         return true;
     } catch (error) {
         if (error instanceof Unauthorized) {
             closeDialog();
-            renderLogin('Your session ended, log in again.');
+            renderLogin('Your session ended. Log in again, and you are asked whether to send it again.');
             return false;
         }
         status.className = 'error';
-        status.textContent = (error as Error).message;
+        if (error instanceof NetworkError) {
+            status.textContent = 'No connection to the server. It is saved, and offered again the next time the page loads.';
+        } else {
+            // The server answered and said no: sending it again would not help
+            clearPending();
+            status.textContent = (error as Error).message;
+        }
         for (const button of buttons) button.disabled = false;
         return false;
     }
@@ -444,7 +550,8 @@ function refillDialog(event: Extract<OverviewEvent, { action: 'refill' }>): void
 
     confirm.addEventListener('click', async () => {
         const body = { organizerId: event.organizerId, days: select ? Number(select.value) : undefined };
-        if (await submit(status, [confirm], () => post('/api/refill', body))) closeDialog();
+        const label = `Refill the ${event.organizerName} organizer${body.days === undefined ? '' : `, ${plural(body.days, 'day')}`}`;
+        if (await submit(status, [confirm], { path: '/api/refill', body, label })) closeDialog();
     });
     openDialog(
         `Refill the ${event.organizerName} organizer`,
@@ -489,7 +596,8 @@ function pickupDialog(med: OverviewMedication): void {
             packageSize: Number(size.value),
             pricePerPackage: price.value === '' ? undefined : Number(price.value),
         };
-        if (await submit(status, [confirm], () => post('/api/pickup', body))) closeDialog();
+        const label = `Pick up ${plural(body.packages, 'package')} of ${body.packageSize} ${med.name}`;
+        if (await submit(status, [confirm], { path: '/api/pickup', body, label })) closeDialog();
     });
     openDialog(
         `Pick up ${med.name}`,
@@ -535,7 +643,8 @@ function renewDialog(med: OverviewMedication): void {
             packageSize: Number(size.value),
             tablets: Number(tablets.value),
         };
-        if (await submit(status, [confirm], () => post('/api/renew', body))) closeDialog();
+        const label = `New prescription for ${med.name}: ${fmt(body.tablets)} tablets, expires ${body.expiresOn}`;
+        if (await submit(status, [confirm], { path: '/api/renew', body, label })) closeDialog();
     });
     openDialog(
         `New prescription for ${med.name}`,
@@ -599,7 +708,8 @@ function countDialog(med: OverviewMedication): void {
     const send = async (drop: boolean) => {
         if (counted.value === '') return;
         const body = { medicationId: med.id, tier: place.tier, organizerId: place.organizerId, tablets: Number(counted.value), drop };
-        if (await submit(status, [save, saveDrop], () => post('/api/count', body))) closeDialog();
+        const label = `Count ${med.name} in ${place.label.toLowerCase()}: ${fmt(body.tablets)}${drop ? ', dropping the difference' : ''}`;
+        if (await submit(status, [save, saveDrop], { path: '/api/count', body, label })) closeDialog();
     };
     save.addEventListener('click', () => void send(false));
     saveDrop.addEventListener('click', () => void send(true));
