@@ -509,10 +509,12 @@ async function submit(
 
 const cancelButton = () => h('button', { type: 'button', onclick: closeDialog as EventListener }, 'Cancel');
 
-/** 13/11 */
-function dayMonth(date: string): string {
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/** Fri 13/11: the weekday too, as the organizer's containers are marked by weekday. */
+function weekdayDayMonth(date: string): string {
     const [, month, day] = date.split('-').map(Number);
-    return `${day}/${month}`;
+    return `${WEEKDAYS[new Date(`${date}T00:00:00Z`).getUTCDay()]} ${day}/${month}`;
 }
 
 function refillDialog(event: Extract<OverviewEvent, { action: 'refill' }>): void {
@@ -530,7 +532,7 @@ function refillDialog(event: Extract<OverviewEvent, { action: 'refill' }>): void
               'select',
               { id: 'refill-days' },
               ...Array.from({ length: fill.maxDays }, (_, i) =>
-                  h('option', { value: String(i + 1), selected: i + 1 === fill.maxDays }, `${plural(i + 1, 'day')}, until ${dayMonth(until(i + 1))}`),
+                  h('option', { value: String(i + 1), selected: i + 1 === fill.maxDays }, `${plural(i + 1, 'day')}, until ${weekdayDayMonth(until(i + 1))}`),
               ),
           )
         : undefined;
@@ -543,7 +545,7 @@ function refillDialog(event: Extract<OverviewEvent, { action: 'refill' }>): void
                 h('li', {}, `${item.name}: ${fmt(days === undefined ? item.tablets : (item.byDays?.[days - 1] ?? 0))}`),
             ),
         );
-        filled.textContent = days === undefined ? '' : `Filled until ${until(days)}.`;
+        filled.textContent = days === undefined ? '' : `Filled until ${weekdayDayMonth(until(days))} (${until(days)}).`;
     };
     select?.addEventListener('change', render);
     render();
