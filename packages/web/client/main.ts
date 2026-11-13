@@ -57,8 +57,10 @@ function daysBetween(from: string, to: string): number {
     return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 }
 
-function whenBadge(today: string, date: string): HTMLElement {
+/** How far off a date is; plain, without a color, when the action can't be done before then anyway. */
+function whenBadge(today: string, date: string, blocked = false): HTMLElement {
     const days = daysBetween(today, date);
+    if (blocked) return h('span', { className: 'badge' }, `in ${plural(days, 'day')}`);
     if (days < 0) return h('span', { className: 'badge late' }, `${plural(-days, 'day')} late`);
     if (days === 0) return h('span', { className: 'badge soon' }, 'today');
     return h('span', { className: `badge ${days <= 7 ? 'soon' : 'later'}` }, `in ${plural(days, 'day')}`);
@@ -407,6 +409,11 @@ function describe(event: OverviewEvent): (Node | string)[] {
     }
 }
 
+/** A pickup the pharmacy won't hand out yet: the 2/3 rule's date is still ahead. */
+function tooEarly(event: OverviewEvent, today: string): boolean {
+    return event.action !== 'refill' && event.pickableFrom !== undefined && event.pickableFrom > today;
+}
+
 function eventButton(event: OverviewEvent, today: string): HTMLElement {
     switch (event.action) {
         case 'refill':
@@ -414,7 +421,11 @@ function eventButton(event: OverviewEvent, today: string): HTMLElement {
             return h('button', { disabled: event.availableFrom > today, onclick: (() => refillDialog(event)) as EventListener }, 'Refill');
         case 'pickup':
         case 'pickup-before-expiry':
-            return h('button', { onclick: (() => pickupDialog(medication(event.medicationId))) as EventListener }, 'Pick up');
+            return h(
+                'button',
+                { disabled: tooEarly(event, today), onclick: (() => pickupDialog(medication(event.medicationId))) as EventListener },
+                'Pick up',
+            );
         case 'contact-doctor':
             return h('button', { onclick: (() => renewDialog(medication(event.medicationId))) as EventListener }, 'New prescription');
     }
@@ -441,9 +452,15 @@ function eventTable(data: Overview): HTMLElement {
                     h(
                         'tr',
                         {},
-                        h('td', {}, event.actionDate, h('div', {}, whenBadge(data.today, event.actionDate))),
+                        h('td', {}, event.actionDate, h('div', {}, whenBadge(data.today, event.actionDate, tooEarly(event, data.today)))),
                         h('td', {}, eventButton(event, data.today)),
-                        h('td', { className: 'wrap' }, ...describe(event)),
+                        h(
+                            'td',
+                            { className: 'wrap' },
+                            ...describe(event),
+                            tooEarly(event, data.today) &&
+                                h('div', { className: 'detail' }, `Can be picked up from ${weekdayDayMonth(event.action === 'refill' ? '' : event.pickableFrom!)} (2/3 rule)`),
+                        ),
                         h('td', {}, event.runsOut),
                     ),
                 ),
@@ -820,6 +837,9 @@ function medicationMenu(med: OverviewMedication): void {
             { className: 'muted' },
             `Cupboard ${fmt(med.tier2)}, pharmacy ${fmt(med.tier3)}, default package ${med.packageSize}.`,
         ),
+        med.pickableFrom !== undefined &&
+            med.pickableFrom > current!.today &&
+            h('p', { className: 'muted' }, `The pharmacy hands out the next pickup from ${weekdayDayMonth(med.pickableFrom)} (2/3 rule).`),
         h(
             'div',
             { className: 'actions' },

@@ -52,6 +52,7 @@ export function overview(input: PlanInput, userName: string): Overview {
                 runsOut: event.runsOut,
                 packages: event.packages,
                 needsRenewal: event.needsRenewal,
+                pickableFrom: event.pickableFrom,
                 expiresOn: event.expiresOn,
             });
         }
@@ -76,7 +77,8 @@ export function overview(input: PlanInput, userName: string): Overview {
                 const since = zeroDoseSince(medication, input.today);
                 return since === undefined || addDays(since, HIDE_AFTER_DAYS) > input.today;
             })
-            .map(({ medication, doses, stock, tier3 }) => ({
+            .map(({ medication, doses, stock, tier3, pickableFrom }) => ({
+                pickableFrom,
             // A pickup waiting for a new prescription isn't one: the table shows there is none left
             nextPickup: events.find(
                 (e) =>

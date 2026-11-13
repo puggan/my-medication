@@ -14,6 +14,8 @@ export interface OverviewMedication {
     /** Next pickup of any kind and next doctor contact, however far ahead. */
     nextPickup?: string;
     nextReorder?: string;
+    /** The first day the 2/3 rule allows the next pickup, after the last recorded one. */
+    pickableFrom?: string;
 }
 
 export type OverviewEvent =
@@ -40,6 +42,8 @@ export type OverviewEvent =
           packages?: number;
           /** A pickup from the new prescription, which has to be renewed first. */
           needsRenewal?: boolean;
+          /** The first day the 2/3 rule allows the pickup. */
+          pickableFrom?: string;
           expiresOn?: string;
       };
 

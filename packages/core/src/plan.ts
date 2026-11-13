@@ -12,6 +12,12 @@ import type { Hundredths } from './tablets.ts';
 /** A prescription can still be picked up while this share of a default package is left on it. */
 export const PICKABLE_SHARE = 0.9;
 
+/**
+ * The pharmacy hands out the next pickup only once this share of the previous one is used at the
+ * prescribed dose: 90 tablets at 1 a day can be followed by the next after 60 days.
+ */
+export const PICKUP_USED_SHARE = 2 / 3;
+
 /** How far ahead the projection looks. */
 const HORIZON_DAYS = 450;
 
@@ -89,6 +95,8 @@ export interface PlanEvent {
     packages?: number;
     /** pickup: nothing is left to pick up, so it waits for the new prescription. */
     needsRenewal?: boolean;
+    /** pickup and pickup-before-expiry: the first day the 2/3 rule allows it. */
+    pickableFrom?: string;
     /** pickup-before-expiry and contact-doctor: the prescription concerned. */
     expiresOn?: string;
 }
@@ -101,6 +109,8 @@ export interface MedicationStatus {
     stock: Stock;
     /** Tablets on prescriptions that can still be picked up today. */
     tier3: Hundredths;
+    /** The first day the 2/3 rule allows the next pickup, after the last recorded one. */
+    pickableFrom?: string;
 }
 
 export interface Plan {
@@ -119,6 +129,7 @@ export function plan(input: PlanInput): Plan {
             doses: new Map(input.organizers.map((box) => [box.id, meds.dose(box.id, input.today)])),
             stock: cloneStock(stock),
             tier3: pickableTablets(stock.lots, input.today),
+            pickableFrom: meds.lastPickup && meds.pickableAfter(meds.lastPickup.date, meds.lastPickup.tablets),
         });
         events.push(...meds.project(stock));
     }
@@ -217,6 +228,8 @@ export function stockAt(input: PlanInput, medication: PlanMedication, date: stri
 
 class MedicationPlan {
     private readonly organizers: PlanOrganizer[];
+    /** The latest pickup up to the history's end, found by history(); the 2/3 rule counts from it. */
+    lastPickup: { date: string; tablets: Hundredths } | undefined;
     /** First day before today each organizer had room for a refill since its last one, found by history(). */
     private overdueRefill = new Map<number, string>();
 
@@ -238,7 +251,7 @@ class MedicationPlan {
         return current?.perDay ?? 0;
     }
 
-    private totalDose(date: string): Hundredths {
+    totalDose(date: string): Hundredths {
         return this.organizers.reduce((sum, box) => sum + this.dose(box.id, date), 0);
     }
 
@@ -246,6 +259,7 @@ class MedicationPlan {
         const stock: Stock = { tier1: new Map(this.organizers.map((box) => [box.id, 0])), tier2: 0, lots: [] };
         const transfers = [...this.medication.transfers].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
         this.overdueRefill.clear();
+        this.lastPickup = undefined;
         if (transfers.length === 0) return stock;
 
         // Tracking starts at the end of the first transfer's day, so that day's doses are already taken
@@ -257,6 +271,7 @@ class MedicationPlan {
                 const transfer = transfers[next]!;
                 apply(stock, transfer);
                 if (transfer.kind === 'refill') this.overdueRefill.delete(transfer.organizerId!);
+                if (transfer.kind === 'pickup') this.lastPickup = { date: transfer.date, tablets: transfer.tablets };
             }
             // From today on the projection tracks it
             if (date >= until) continue;
@@ -267,6 +282,12 @@ class MedicationPlan {
             }
         }
         return stock;
+    }
+
+    /** The first day the 2/3 rule allows a pickup after one of tablets on date, at that day's dose. */
+    pickableAfter(date: string, tablets: Hundredths): string | undefined {
+        const perDay = this.totalDose(addDays(date, 1));
+        return perDay === 0 ? undefined : addDays(date, Math.ceil((tablets * PICKUP_USED_SHARE) / perDay));
     }
 
     private drain(stock: Stock, date: string): void {
@@ -330,6 +351,14 @@ class MedicationPlan {
         const home = () => [...stock.tier1.values()].reduce((sum, n) => sum + n, stock.tier2);
         const runsOut = (date: string, tablets: Hundredths, perDay: Hundredths) =>
             addDays(date, Math.max(0, Math.floor(tablets / perDay)) + 1);
+        // The 2/3 rule: no pickup before nextPickable, which each pickup moves on
+        let nextPickable = this.lastPickup && this.pickableAfter(this.lastPickup.date, this.lastPickup.tablets);
+        const pickup = (warnOn: string, tablets: Hundredths) => {
+            const pickableFrom = nextPickable;
+            const actionDate = pickableFrom !== undefined && pickableFrom > warnOn ? pickableFrom : warnOn;
+            nextPickable = this.pickableAfter(actionDate, tablets);
+            return { actionDate, pickableFrom };
+        };
 
         for (let date = today; date <= addDays(today, HORIZON_DAYS); date = addDays(date, 1)) {
             if (date > today) this.drain(stock, date);
@@ -337,18 +366,19 @@ class MedicationPlan {
             if (perDay === 0 && this.laterDoses(date)) continue;
             if (perDay === 0) break;
 
-            // On its last day, pick up what is left on a prescription rather than lose it
+            // On its last day, pick up what is left on a prescription rather than lose it, unless the
+            // 2/3 rule doesn't allow a pickup before then
             for (const lot of stock.lots) {
                 if (lot.expiresOn !== date) continue;
                 const packages = pickablePackages(lot.tablets, pkg);
-                if (packages === 0) continue;
+                if (packages === 0 || (nextPickable !== undefined && nextPickable > lot.expiresOn)) continue;
                 lot.tablets = Math.max(0, lot.tablets - packages * pkg);
                 stock.tier2 += packages * pkg;
                 events.push({
                     action: 'pickup-before-expiry',
                     medicationId,
                     medicationName,
-                    actionDate: addDays(date, -pickupWarningDays),
+                    ...pickup(addDays(date, -pickupWarningDays), packages * pkg),
                     runsOut: addDays(date, 1),
                     packages,
                     expiresOn: lot.expiresOn,
@@ -382,7 +412,7 @@ class MedicationPlan {
                         action: 'pickup',
                         medicationId,
                         medicationName,
-                        actionDate: addDays(date, -pickupWarningDays),
+                        ...pickup(addDays(date, -pickupWarningDays), packages * pkg),
                         runsOut: shortBy,
                         packages,
                     });
@@ -392,13 +422,14 @@ class MedicationPlan {
                     // which is ordered a lead time before the medication runs out
                     const expired = stock.lots.find((lot) => lot.expiresOn < date && pickablePackages(lot.tablets, pkg) > 0);
                     const emptyOn = runsOut(date, home(), perDay);
+                    const renewalPackages = Math.ceil((total - stock.tier2) / pkg);
                     events.push({
                         action: 'pickup',
                         medicationId,
                         medicationName,
-                        actionDate: addDays(date, -pickupWarningDays),
+                        ...pickup(addDays(date, -pickupWarningDays), renewalPackages * pkg),
                         runsOut: runsOut(date, home(), perDay),
-                        packages: Math.ceil((total - stock.tier2) / pkg),
+                        packages: renewalPackages,
                         needsRenewal: true,
                     });
                     events.push({
