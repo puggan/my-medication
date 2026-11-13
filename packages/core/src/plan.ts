@@ -289,9 +289,12 @@ class MedicationPlan {
         return stock;
     }
 
-    /** The first day the 2/3 rule allows a pickup after one of tablets on date, at that day's dose. */
+    /**
+     * The first day the 2/3 rule allows a pickup after one of tablets on date, at that day's dose,
+     * or today's for a pickup from before any dose was recorded.
+     */
     pickableAfter(date: string, tablets: Hundredths): string | undefined {
-        const perDay = this.totalDose(addDays(date, 1));
+        const perDay = this.totalDose(addDays(date, 1)) || this.totalDose(addDays(this.input.today, 1));
         return perDay === 0 ? undefined : addDays(date, Math.ceil((tablets * PICKUP_USED_SHARE) / perDay));
     }
 
