@@ -295,7 +295,8 @@ class MedicationPlan {
      */
     pickableAfter(date: string, tablets: Hundredths): string | undefined {
         const perDay = this.totalDose(addDays(date, 1)) || this.totalDose(addDays(this.input.today, 1));
-        return perDay === 0 ? undefined : addDays(date, Math.ceil((tablets * PICKUP_USED_SHARE) / perDay));
+        // Rounded down, as the pharmacy does: 100 tablets at 1 a day from 26/10 can be followed on 31/12
+        return perDay === 0 ? undefined : addDays(date, Math.floor((tablets * PICKUP_USED_SHARE) / perDay));
     }
 
     private drain(stock: Stock, date: string): void {
