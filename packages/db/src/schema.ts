@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+    boolean,
     char,
     check,
     customType,
@@ -147,6 +148,11 @@ export const transfer = mysqlTable(
         /** Only for renew: the last day the prescription can be picked up. */
         expiresOn: day(),
         note: varchar({ length: 255 }),
+        /**
+         * False for a pickup from before tracking started: it moves no stock, as the opening stock
+         * already holds it, but the 2/3 rule counts from it.
+         */
+        countsInStock: boolean().notNull().default(true),
         createdBy: int({ unsigned: true }).notNull(),
         createdAt: createdAt(),
         updatedAt: timestamp(),
@@ -159,6 +165,7 @@ export const transfer = mysqlTable(
         check('transfer_drop_tier', sql`(kind = 'drop') = (tier IS NOT NULL) AND (tier IS NULL OR tier BETWEEN 1 AND 3)`),
         check('transfer_tablets', sql`kind = 'drop' OR tablets > 0`),
         check('transfer_organizer_tier', sql`(organizer_id IS NOT NULL) = (kind = 'refill' OR tier = 1)`),
+        check('transfer_counts_in_stock', sql`counts_in_stock OR kind = 'pickup'`),
         check('transfer_expires', sql`(kind = 'renew') = (expires_on IS NOT NULL)`),
         check('transfer_packages', sql`(packages IS NULL) = (package_size IS NULL) AND (packages IS NULL OR kind = 'pickup')`),
     ],

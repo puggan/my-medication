@@ -42,6 +42,8 @@ export interface PlanTransfer {
     tier: number | null;
     organizerId: number | null;
     expiresOn: string | null;
+    /** False for a pickup from before tracking: no stock moves, but the 2/3 rule counts from it. */
+    countsInStock: boolean;
 }
 
 export interface PlanMedication {
@@ -257,9 +259,12 @@ class MedicationPlan {
 
     history(until: string): Stock {
         const stock: Stock = { tier1: new Map(this.organizers.map((box) => [box.id, 0])), tier2: 0, lots: [] };
-        const transfers = [...this.medication.transfers].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+        const sorted = [...this.medication.transfers].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+        const transfers = sorted.filter((t) => t.countsInStock);
         this.overdueRefill.clear();
+        // Pickups from before tracking only count for the 2/3 rule
         this.lastPickup = undefined;
+        for (const t of sorted) if (t.kind === 'pickup' && !t.countsInStock && t.date <= until) this.lastPickup = { date: t.date, tablets: t.tablets };
         if (transfers.length === 0) return stock;
 
         // Tracking starts at the end of the first transfer's day, so that day's doses are already taken

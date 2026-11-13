@@ -1,0 +1,2 @@
+ALTER TABLE `transfer` ADD `counts_in_stock` boolean DEFAULT true NOT NULL;--> statement-breakpoint
+ALTER TABLE `transfer` ADD CONSTRAINT `transfer_counts_in_stock` CHECK (counts_in_stock OR kind = 'pickup');

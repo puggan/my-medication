@@ -35,7 +35,16 @@ export async function recordPickup(
     tx: Tx,
     owner: User,
     med: Medication,
-    values: { packages: number; packageSize: number; pricePerPackage?: string; product?: string; date: string; note?: string },
+    values: {
+        packages: number;
+        packageSize: number;
+        pricePerPackage?: string;
+        product?: string;
+        date: string;
+        note?: string;
+        /** A pickup from before tracking started, recorded for the 2/3 rule only. */
+        beforeTracking?: boolean;
+    },
 ): Promise<void> {
     if (!Number.isInteger(values.packages) || values.packages < 1) throw new Error('Pick up at least one package');
     if (!Number.isInteger(values.packageSize) || values.packageSize < 1) throw new Error('A package holds at least one tablet');
@@ -47,6 +56,7 @@ export async function recordPickup(
         packageSize: values.packageSize,
         date: values.date,
         note: values.note,
+        countsInStock: !values.beforeTracking,
         createdBy: owner.id,
     }).$returningId()) as [{ id: number }];
     if (values.pricePerPackage !== undefined) {

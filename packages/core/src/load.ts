@@ -34,6 +34,7 @@ export async function loadPlanInput(db: Db | Tx, owner: User, today = swedishTod
                     tier: t.tier,
                     organizerId: t.organizerId,
                     expiresOn: t.expiresOn,
+                    countsInStock: t.countsInStock,
                 })),
         })),
     };

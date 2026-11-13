@@ -86,6 +86,8 @@ const USAGE = `Usage:
            [--date YYYY-MM-DD]
       Packages picked up at the pharmacy; the package size defaults to the medication's. --price
       also adds the price per package to the price history, with --product as sold.
+      --before-tracking records a pickup from before the opening stock: it moves no stock, but the
+      pharmacy's 2/3 rule (the next pickup once 2/3 is used) counts from it.
 
   med price list [<name>]
       Prices with the cost per year at today's dose, at full price and with the discount the
@@ -148,6 +150,7 @@ const { positionals, values } = parseArgs({
         packages: { type: 'string', default: '1' },
         drop: { type: 'boolean', default: false },
         product: { type: 'string' },
+        'before-tracking': { type: 'boolean', default: false },
         'dry-run': { type: 'boolean', default: false },
         help: { type: 'boolean', short: 'h' },
     },
@@ -443,11 +446,13 @@ async function runPickup(db: Db, [name]: string[]): Promise<number> {
             product: values.product,
             date,
             note: values.note,
+            beforeTracking: values['before-tracking'],
         });
         return packageSize;
     });
     const paid = pricePerPackage === undefined ? '' : `, ${pricePerPackage} SEK per package`;
-    console.log(`${mark} ${name}: picked up ${packages} × ${size} = ${packages * size} tablets on ${date}${paid}`);
+    const rule = values['before-tracking'] ? ' (before tracking: for the 2/3 rule only, no stock moved)' : '';
+    console.log(`${mark} ${name}: picked up ${packages} × ${size} = ${packages * size} tablets on ${date}${paid}${rule}`);
     return 0;
 }
 
