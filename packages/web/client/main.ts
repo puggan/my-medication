@@ -389,7 +389,7 @@ function describe(event: OverviewEvent): (Node | string)[] {
             return [
                 `Pick up ${plural(event.packages ?? 1, 'package')} of ${event.medicationName}`,
                 ...(event.needsRenewal
-                    ? [h('div', { className: 'detail' }, 'From the new prescription, once the doctor has renewed it')]
+                    ? [h('div', { className: 'detail' }, 'From the new prescription')]
                     : []),
             ];
         case 'pickup-before-expiry':
@@ -409,9 +409,20 @@ function describe(event: OverviewEvent): (Node | string)[] {
     }
 }
 
-/** A pickup the pharmacy won't hand out yet: the 2/3 rule's date is still ahead. */
+/**
+ * A pickup the pharmacy won't hand out yet: from a prescription not registered, or before the 2/3
+ * rule's date.
+ */
 function tooEarly(event: OverviewEvent, today: string): boolean {
-    return event.action !== 'refill' && event.pickableFrom !== undefined && event.pickableFrom > today;
+    if (event.action === 'refill') return false;
+    return event.needsRenewal === true || (event.pickableFrom !== undefined && event.pickableFrom > today);
+}
+
+/** Why a pickup can't be made yet, under its description. */
+function tooEarlyReason(event: OverviewEvent): string {
+    if (event.action === 'refill') return '';
+    if (event.needsRenewal) return 'Record the new prescription first, once the doctor has renewed it';
+    return `Can be picked up from ${weekdayDayMonth(event.pickableFrom!)} (2/3 rule)`;
 }
 
 function eventButton(event: OverviewEvent, today: string): HTMLElement {
@@ -458,8 +469,7 @@ function eventTable(data: Overview): HTMLElement {
                             'td',
                             { className: 'wrap' },
                             ...describe(event),
-                            tooEarly(event, data.today) &&
-                                h('div', { className: 'detail' }, `Can be picked up from ${weekdayDayMonth(event.action === 'refill' ? '' : event.pickableFrom!)} (2/3 rule)`),
+                            tooEarly(event, data.today) && h('div', { className: 'detail' }, tooEarlyReason(event)),
                         ),
                         h('td', {}, event.runsOut),
                     ),
