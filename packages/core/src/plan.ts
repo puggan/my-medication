@@ -208,21 +208,26 @@ export function organizerFill(input: PlanInput, organizerId: number, date: strin
         const meds = new MedicationPlan(input, medication);
         const perDay = meds.dose(organizerId, addDays(date, 1));
         if (perDay === 0) continue;
-        const tablets = Math.max(0, meds.history(date).tier1.get(organizerId) ?? 0);
+        const tablets = meds.heldForRefill(meds.history(date), organizerId, date);
         held.set(medication.id, { plan: meds, tablets });
         const lastDay = addDays(date, Math.floor(tablets / perDay));
         if (filledUntil === undefined || lastDay < filledUntil) filledUntil = lastDay;
     }
     if (filledUntil === undefined) return { filledUntil: date, maxDays: 0, amounts: new Map() };
 
-    const maxDays = Math.max(0, box.containers * box.containerDays - daysBetween(date, filledUntil));
+    // The slots run from tomorrow, or from today when today's dose was never in the organizer
+    const lastSlot = addDays(filledUntil < date ? addDays(date, -1) : date, box.containers * box.containerDays);
+    const maxDays = Math.max(0, daysBetween(filledUntil, lastSlot));
     const amounts = new Map<number, Hundredths[]>();
     for (const [id, { plan: meds, tablets }] of held) {
         const options: Hundredths[] = [];
+        // What is needed counts from tomorrow, as today's dose is already drained (tablets is below 0
+        // when it was never in the organizer); one option per day from the first empty slot, which
+        // can be today's
         let needed = 0;
-        for (let day = 1; day <= daysBetween(date, filledUntil) + maxDays; day++) {
-            needed += meds.dose(organizerId, addDays(date, day));
-            if (day > daysBetween(date, filledUntil)) options.push(Math.max(0, needed - tablets));
+        for (let day = filledUntil < date ? date : addDays(date, 1); day <= lastSlot; day = addDays(day, 1)) {
+            if (day > date) needed += meds.dose(organizerId, day);
+            if (day > filledUntil) options.push(Math.max(0, needed - tablets));
         }
         amounts.set(id, options);
     }
@@ -325,13 +330,22 @@ class MedicationPlan {
     }
 
     /**
-     * Tablets that top an organizer up to full at the end of date. Below 0 it is just empty: the
-     * missing doses were never in it, so a count should settle them, not the refill.
+     * What an organizer holds at the end of date, as a refill that day sees it. Below 0 by the day's
+     * dose means that dose was never in it, so a refill that day (in the morning, say) fills that
+     * day's slot too; the order within a day isn't known. A larger deficit means refills weren't
+     * recorded, which a count settles, not the refill.
      */
+    heldForRefill(stock: Stock, boxId: number, date: string): Hundredths {
+        return Math.max(stock.tier1.get(boxId) ?? 0, -this.dose(boxId, date));
+    }
+
+    /** Tablets that top an organizer up to full at the end of date. */
     fillUp(stock: Stock, box: PlanOrganizer, date: string): Hundredths {
+        const held = this.heldForRefill(stock, box.id, date);
+        const lastSlot = addDays(held < 0 ? addDays(date, -1) : date, box.containers * box.containerDays);
         let full = 0;
-        for (let day = 1; day <= box.containers * box.containerDays; day++) full += this.dose(box.id, addDays(date, day));
-        return Math.max(0, full - Math.max(0, stock.tier1.get(box.id) ?? 0));
+        for (let day = addDays(date, 1); day <= lastSlot; day = addDays(day, 1)) full += this.dose(box.id, day);
+        return Math.max(0, full - held);
     }
 
     /**
