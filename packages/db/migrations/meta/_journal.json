@@ -78,6 +78,13 @@
       "when": 1794583655335,
       "tag": "0010_transfer_counts_in_stock",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1795537850075,
+      "tag": "0011_units_open_organizers_trust",
+      "breakpoints": true
     }
   ]
 }

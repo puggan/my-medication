@@ -62,12 +62,21 @@ export const user = mysqlTable('user', {
  * Set of pill organizers for one time of day, e.g. two weekly morning containers. It holds
  * containers × containerDays and is refilled once a container is empty, back up to full.
  */
+export const organizerKinds = ['slots', 'open'] as const;
+export type OrganizerKind = (typeof organizerKinds)[number];
+
+/**
+ * kind slots: a pill organizer of day slots, filled a number of days at a time (containers and
+ * containerDays give its size). kind open: a place holding opened packages, refilled by opening a
+ * new one when the last runs out (containers and containerDays unused).
+ */
 export const organizer = mysqlTable(
     'organizer',
     {
         id: int({ unsigned: true }).autoincrement().primaryKey(),
         userId: int({ unsigned: true }).notNull(),
         name: varchar({ length: 32 }).notNull(),
+        kind: mysqlEnum(organizerKinds).notNull().default('slots'),
         containers: tinyint({ unsigned: true }).notNull().default(1),
         containerDays: tinyint({ unsigned: true }).notNull().default(7),
         createdAt: createdAt(),
@@ -79,20 +88,55 @@ export const organizer = mysqlTable(
     ],
 );
 
-/** packageSize is the usual package; actual pickups record what they got, and prices go in price. */
+/** What a medication is counted in; all amounts and doses are in this unit. */
+export const medicationUnits = ['tablet', 'E', 'piece'] as const;
+export type MedicationUnit = (typeof medicationUnits)[number];
+
+/**
+ * packageSize is the usual package, in unit; actual pickups record what they got, and prices go in
+ * price. openSize is what opening one package puts in an open organizer, when that is less than a
+ * package: a pen out of a box of ten.
+ */
 export const medication = mysqlTable(
     'medication',
     {
         id: int({ unsigned: true }).autoincrement().primaryKey(),
         userId: int({ unsigned: true }).notNull(),
         name: varchar({ length: 128 }).notNull(),
+        unit: mysqlEnum(medicationUnits).notNull().default('tablet'),
         packageSize: smallint({ unsigned: true }).notNull(),
+        openSize: smallint({ unsigned: true }),
+        /** The prescription's dosage text, e.g. "1 tablet as needed, max 3 a day". */
+        usage: varchar({ length: 255 }),
+        /** Where it is kept when that matters, e.g. "Fridge". */
+        storage: varchar({ length: 64 }),
         createdAt: createdAt(),
     },
     (t) => [
         uniqueIndex('medication_user_name').on(t.userId, t.name),
         foreignKey({ name: 'medication_user', columns: [t.userId], foreignColumns: [user.id] }),
         check('medication_package_size', sql`package_size > 0`),
+        check('medication_open_size', sql`open_size IS NULL OR (open_size > 0 AND open_size <= package_size)`),
+    ],
+);
+
+/**
+ * giverId lets trustedId see their medications and act for them: switch to their view on the web,
+ * and record pickups, refills and the rest, which are stored as done by trustedId.
+ */
+export const trust = mysqlTable(
+    'trust',
+    {
+        id: int({ unsigned: true }).autoincrement().primaryKey(),
+        giverId: int({ unsigned: true }).notNull(),
+        trustedId: int({ unsigned: true }).notNull(),
+        createdAt: createdAt(),
+    },
+    (t) => [
+        uniqueIndex('trust_giver_trusted').on(t.giverId, t.trustedId),
+        foreignKey({ name: 'trust_giver', columns: [t.giverId], foreignColumns: [user.id] }),
+        foreignKey({ name: 'trust_trusted', columns: [t.trustedId], foreignColumns: [user.id] }),
+        check('trust_not_self', sql`giver_id <> trusted_id`),
     ],
 );
 
@@ -290,6 +334,7 @@ export const calendarFeed = mysqlTable(
 
 export type User = typeof user.$inferSelect;
 export type Organizer = typeof organizer.$inferSelect;
+export type Trust = typeof trust.$inferSelect;
 export type Medication = typeof medication.$inferSelect;
 export type Dose = typeof dose.$inferSelect;
 export type Transfer = typeof transfer.$inferSelect;

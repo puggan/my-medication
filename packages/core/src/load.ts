@@ -16,11 +16,12 @@ export async function loadPlanInput(db: Db | Tx, owner: User, today = swedishTod
         refillWeekday: owner.refillWeekday,
         pickupWarningDays: owner.pickupWarningDays,
         renewalLeadDays: owner.renewalLeadDays,
-        organizers: organizers.map(({ id, name, containers, containerDays }) => ({ id, name, containers, containerDays })),
+        organizers: organizers.map(({ id, name, kind, containers, containerDays }) => ({ id, name, kind, containers, containerDays })),
         medications: meds.map((med) => ({
             id: med.id,
             name: med.name,
             packageSize: med.packageSize,
+            openSize: med.openSize,
             doses: doses
                 .filter((d) => d.medicationId === med.id)
                 .map((d) => ({ organizerId: d.organizerId, startDate: d.startDate, perDay: fromDecimal(d.perDay) })),

@@ -24,6 +24,8 @@ const HORIZON_DAYS = 450;
 export interface PlanOrganizer {
     id: number;
     name: string;
+    /** slots: day slots filled a number of days at a time; open: opened packages, one opened at a time. */
+    kind: 'slots' | 'open';
     containers: number;
     containerDays: number;
 }
@@ -50,6 +52,8 @@ export interface PlanMedication {
     id: number;
     name: string;
     packageSize: number;
+    /** What opening one package puts in an open organizer, when less than a package (a pen of ten). */
+    openSize: number | null;
     doses: PlanDose[];
     transfers: PlanTransfer[];
 }
@@ -177,12 +181,14 @@ export function zeroDoseSince(medication: PlanMedication, date: string): string 
 
 /**
  * Tablets that top one organizer up to full at the end of date, from the recorded transfers: what a
- * refill done that day moves, early or on time.
+ * refill done that day moves, early or on time. For an open organizer, one opened package.
  */
 export function refillAmount(input: PlanInput, medication: PlanMedication, organizerId: number, date: string): Hundredths {
     const meds = new MedicationPlan(input, medication);
     const box = input.organizers.find((o) => o.id === organizerId);
     if (!box) throw new Error(`No organizer ${organizerId}`);
+    // Refilling an open organizer by hand is opening one package
+    if (box.kind === 'open') return meds.openSize;
     return meds.fillUp(meds.history(date), box, date);
 }
 
@@ -202,6 +208,8 @@ export interface OrganizerFill {
 export function organizerFill(input: PlanInput, organizerId: number, date: string): OrganizerFill {
     const box = input.organizers.find((o) => o.id === organizerId);
     if (!box) throw new Error(`No organizer ${organizerId}`);
+    // An open organizer is refilled a package at a time, not by days
+    if (box.kind === 'open') return { filledUntil: date, maxDays: 0, amounts: new Map() };
     const held = new Map<number, { plan: MedicationPlan; tablets: Hundredths }>();
     let filledUntil: string | undefined;
     for (const medication of input.medications) {
@@ -326,7 +334,13 @@ class MedicationPlan {
     /** Whether at least one more day fits in an organizer at the end of date, so it can be refilled. */
     private canRefill(stock: Stock, box: PlanOrganizer, date: string): boolean {
         const perDay = this.dose(box.id, addDays(date, 1));
+        if (box.kind === 'open') return perDay > 0;
         return perDay > 0 && (stock.tier1.get(box.id) ?? 0) <= (box.containers * box.containerDays - 1) * perDay;
+    }
+
+    /** What opening one package puts in an open organizer. */
+    get openSize(): Hundredths {
+        return (this.medication.openSize ?? this.medication.packageSize) * 100;
     }
 
     /**
@@ -339,9 +353,16 @@ class MedicationPlan {
         return Math.max(stock.tier1.get(boxId) ?? 0, -this.dose(boxId, date));
     }
 
-    /** Tablets that top an organizer up to full at the end of date. */
+    /**
+     * Tablets that top an organizer up to full at the end of date; for an open organizer, the
+     * packages opened to cover tomorrow.
+     */
     fillUp(stock: Stock, box: PlanOrganizer, date: string): Hundredths {
         const held = this.heldForRefill(stock, box.id, date);
+        if (box.kind === 'open') {
+            const short = this.dose(box.id, addDays(date, 1)) - held;
+            return short <= 0 ? 0 : Math.ceil(short / this.openSize) * this.openSize;
+        }
         const lastSlot = addDays(held < 0 ? addDays(date, -1) : date, box.containers * box.containerDays);
         let full = 0;
         for (let day = addDays(date, 1); day <= lastSlot; day = addDays(day, 1)) full += this.dose(box.id, day);
@@ -361,6 +382,20 @@ class MedicationPlan {
             if (perDay === 0) continue;
             const held = stock.tier1.get(box.id) ?? 0;
             const lastDay = addDays(today, Math.floor(held / perDay));
+            // An open organizer gets one more package opened, which can be done any day
+            if (box.kind === 'open') {
+                events.push({
+                    action: 'refill',
+                    medicationId: this.medication.id,
+                    medicationName: this.medication.name,
+                    actionDate: lastDay,
+                    runsOut: addDays(lastDay, 1),
+                    refill: new Map([[box.id, this.openSize]]),
+                    due: new Map([[box.id, lastDay]]),
+                    availableFrom: today,
+                });
+                continue;
+            }
             let full = 0;
             for (let day = 1; day <= box.containers * box.containerDays; day++) full += this.dose(box.id, addDays(lastDay, day));
             const room = (box.containers * box.containerDays - 1) * perDay;
@@ -433,7 +468,9 @@ class MedicationPlan {
             for (const box of this.organizers) {
                 const next = this.dose(box.id, addDays(date, 1));
                 const held = stock.tier1.get(box.id) ?? 0;
-                if (next > 0 && (held < next || (refillDay && this.canRefill(stock, box, date)))) {
+                // Open organizers only get a package opened when the last one runs out
+                const topUp = refillDay && box.kind === 'slots' && this.canRefill(stock, box, date);
+                if (next > 0 && (held < next || topUp)) {
                     needs.set(box.id, this.fillUp(stock, box, date));
                 }
             }
