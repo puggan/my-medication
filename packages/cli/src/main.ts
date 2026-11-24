@@ -42,6 +42,7 @@ import {
     revokePasskey,
 } from './passkey.ts';
 import { listPrices } from './price.ts';
+import { addTrust, addUser, listTrust, listUsers, removeTrust } from './user.ts';
 import { eventTable, stockTable } from './report.ts';
 import { inTransaction } from './transaction.ts';
 
@@ -57,19 +58,37 @@ const USAGE = `Usage:
       pickups, plus however far ahead the next pickup of each medication, and every doctor
       contact and pickup before expiry.
 
+  med user list
+  med user add <name>
+      Users whose medications are tracked; a new one needs an organizer before medications.
+
+  med trust list
+  med trust add <giver> <trusted>
+  med trust remove <giver> <trusted>
+      <trusted> may see <giver>'s medications and act for them, switching to their view on the web.
+
   med organizer list
   med organizer add <name> --containers <n> [--container-days 7]
+  med organizer add <name> --kind open
       Pill organizers for one time of day, e.g. "morning" with 2 weekly containers. Each is
-      refilled once a container is empty, back up to containers × container days.
+      refilled once a container is empty, back up to containers × container days. An open
+      organizer is a place holding opened packages instead, e.g. "living room": a new package
+      (or --open-size of it, such as one pen) is opened when the last runs out.
 
   med medication list [--date YYYY-MM-DD]
       List medications with the dose per organizer in effect on --date (default today).
 
-  med medication add <name> --per-day <tablets> --package-size <tablets> [--from YYYY-MM-DD]
+  med medication add <name> --per-day <n> --package-size <n> [--from YYYY-MM-DD] [details]
       Add a medication with its first dose in --organizer, starting --from (default today).
 
-  med medication set <name> --package-size <tablets>
-      Change the default package size.
+  med medication set <name> [--package-size <n>] [details]
+      Change the default package size or the details:
+        --unit tablet|E|piece   what doses, packages and stock are counted in (default tablet)
+        --open-size <n>         what one opened package holds when less than a package, e.g. 450
+                                for one pen out of a box of ten; "" makes it a whole package
+        --usage <text>          the prescription's dosage, e.g. "1 tablet as needed, max 3 a day"
+        --storage <text>        where it is kept when that matters, e.g. "Fridge"
+      Amounts are in the unit: a prescription given in pickups is pickups × the amount of one.
 
   med dose set <name> <tablets per day> [--from YYYY-MM-DD]
       Change the dose in --organizer from --from (default today) on. 0 ends the medication there;
@@ -134,6 +153,11 @@ const { positionals, values } = parseArgs({
     allowNegative: false,
     options: {
         user: { type: 'string' },
+        kind: { type: 'string', default: 'slots' },
+        unit: { type: 'string' },
+        'open-size': { type: 'string' },
+        usage: { type: 'string' },
+        storage: { type: 'string' },
         name: { type: 'string' },
         organizer: { type: 'string' },
         containers: { type: 'string' },
@@ -168,6 +192,11 @@ const commands: Record<string, { argc: number; run: (db: Db, args: string[]) => 
     'passkey revoke': { argc: 1, run: runPasskeyRevoke },
     'feed list': { argc: 0, run: runFeedList },
     'feed revoke': { argc: 1, run: runFeedRevoke },
+    'user list': { argc: 0, run: runUserList },
+    'user add': { argc: 1, run: runUserAdd },
+    'trust list': { argc: 0, run: runTrustList },
+    'trust add': { argc: 2, run: runTrustAdd },
+    'trust remove': { argc: 2, run: runTrustRemove },
     'organizer list': { argc: 0, run: runOrganizerList },
     'organizer add': { argc: 1, run: runOrganizerAdd },
     'medication list': { argc: 0, run: runMedicationList },
@@ -286,20 +315,58 @@ async function runFeedRevoke(db: Db, [id]: string[]): Promise<number> {
 
 async function runOrganizerList(db: Db): Promise<number> {
     for (const box of await listOrganizers(db, await findUser(db, values.user))) {
-        console.log(`${box.name}: ${box.containers} × ${box.containerDays} days`);
+        console.log(`${box.name}: ${box.kind === 'open' ? 'open packages' : `${box.containers} × ${box.containerDays} days`}`);
     }
     return 0;
 }
 
 async function runOrganizerAdd(db: Db, [name]: string[]): Promise<number> {
-    if (values.containers === undefined) throw new Error('organizer add needs --containers');
+    const kind = values.kind;
+    if (kind !== 'slots' && kind !== 'open') throw new Error('--kind is slots or open');
+    if (kind === 'slots' && values.containers === undefined) throw new Error('organizer add needs --containers');
     const input = {
         name: name!,
-        containers: parsePositiveInt('--containers', values.containers),
+        kind,
+        containers: kind === 'open' ? 1 : parsePositiveInt('--containers', values.containers!),
         containerDays: parsePositiveInt('--container-days', values['container-days']),
-    };
-    await inTransaction(db, dryRun, async (tx) => addOrganizer(tx, await findUser(tx, values.user), input));
-    console.log(`${mark} Added organizer ${input.name}: ${input.containers} × ${input.containerDays} days`);
+    } as const;
+    const owner = await inTransaction(db, dryRun, async (tx) => {
+        const owner = await findUser(tx, values.user);
+        await addOrganizer(tx, owner, input);
+        return owner;
+    });
+    const size = kind === 'open' ? 'open packages' : `${input.containers} × ${input.containerDays} days`;
+    console.log(`${mark} Added organizer ${input.name} for ${owner.name}: ${size}`);
+    return 0;
+}
+
+async function runUserList(db: Db): Promise<number> {
+    for (const row of await listUsers(db)) console.log(`#${row.id}  ${row.name}  (since ${row.createdAt})`);
+    return 0;
+}
+
+async function runUserAdd(db: Db, [name]: string[]): Promise<number> {
+    await inTransaction(db, dryRun, (tx) => addUser(tx, name!));
+    console.log(`${mark} Added user ${name}; next: med organizer add <name> --user ${name}`);
+    return 0;
+}
+
+async function runTrustList(db: Db): Promise<number> {
+    const rows = await listTrust(db);
+    if (rows.length === 0) console.log('No trust given');
+    for (const row of rows) console.log(`${row.trusted} may see and act for ${row.giver}  (since ${row.since})`);
+    return 0;
+}
+
+async function runTrustAdd(db: Db, [from, to]: string[]): Promise<number> {
+    await inTransaction(db, dryRun, async (tx) => addTrust(tx, await findUser(tx, from), await findUser(tx, to)));
+    console.log(`${mark} ${to} may now see and act for ${from}`);
+    return 0;
+}
+
+async function runTrustRemove(db: Db, [from, to]: string[]): Promise<number> {
+    await inTransaction(db, dryRun, async (tx) => removeTrust(tx, await findUser(tx, from), await findUser(tx, to)));
+    console.log(`${mark} ${to} may no longer see or act for ${from}`);
     return 0;
 }
 
@@ -310,14 +377,30 @@ async function runMedicationList(db: Db): Promise<number> {
     const rows = await listMedications(db, owner, date);
     const width = Math.max(4, ...rows.map(({ med }) => med.name.length));
     const boxWidths = organizers.map((box) => Math.max(7, box.name.length));
-    console.log(`${'Name'.padEnd(width)}  ${organizers.map((box, i) => box.name.padStart(boxWidths[i]!)).join('  ')}  Package`);
+    console.log(`${'Name'.padEnd(width)}  ${organizers.map((box, i) => box.name.padStart(boxWidths[i]!)).join('  ')}  Package  Unit    Opened  Details`);
     for (const { med, doses } of rows) {
         const perBox = organizers.map((box, i) => (doses.get(box.id) ?? '-').padStart(boxWidths[i]!));
+        const details = [med.usage, med.storage].filter((part) => part !== null).join('; ');
         console.log(
-            `${med.name.padEnd(width)}  ${perBox.join('  ')}  ${String(med.packageSize).padStart(7)}`,
+            `${med.name.padEnd(width)}  ${perBox.join('  ')}  ${String(med.packageSize).padStart(7)}  ${med.unit.padEnd(6)}` +
+                `  ${String(med.openSize ?? '-').padStart(6)}  ${details}`.trimEnd(),
         );
     }
     return 0;
+}
+
+/** --unit, --open-size, --usage and --storage; "" clears a text or the opened size. */
+function medicationDetails() {
+    const unit = values.unit;
+    if (unit !== undefined && unit !== 'tablet' && unit !== 'E' && unit !== 'piece') throw new Error('--unit is tablet, E or piece');
+    const text = (value: string | undefined) => (value === undefined ? undefined : value.trim() === '' ? null : value.trim());
+    const openSize = values['open-size'];
+    return {
+        unit,
+        openSize: openSize === undefined ? undefined : openSize === '' ? null : parsePositiveInt('--open-size', openSize),
+        usage: text(values.usage),
+        storage: text(values.storage),
+    } as const;
 }
 
 async function runMedicationAdd(db: Db, [name]: string[]): Promise<number> {
@@ -330,10 +413,18 @@ async function runMedicationAdd(db: Db, [name]: string[]): Promise<number> {
         packageSize: parsePositiveInt('--package-size', values['package-size']),
         from: values.from === undefined ? today() : parseDate('--from', values.from),
     };
+    const details = medicationDetails();
     const box = await inTransaction(db, dryRun, async (tx) => {
         const owner = await findUser(tx, values.user);
         const organizer = await findOrganizer(tx, owner, values.organizer);
-        await addMedication(tx, owner, { ...input, organizer });
+        await addMedication(tx, owner, {
+            ...input,
+            organizer,
+            unit: details.unit,
+            openSize: details.openSize ?? undefined,
+            usage: details.usage ?? undefined,
+            storage: details.storage ?? undefined,
+        });
         return organizer;
     });
     console.log(
@@ -343,12 +434,17 @@ async function runMedicationAdd(db: Db, [name]: string[]): Promise<number> {
 }
 
 async function runMedicationSet(db: Db, [name]: string[]): Promise<number> {
-    const packageSize =
-        values['package-size'] === undefined ? undefined : parsePositiveInt('--package-size', values['package-size']);
+    const changes = {
+        packageSize: values['package-size'] === undefined ? undefined : parsePositiveInt('--package-size', values['package-size']),
+        ...medicationDetails(),
+    };
     await inTransaction(db, dryRun, async (tx) => {
-        await updateMedication(tx, await findMedication(tx, await findUser(tx, values.user), name!), { packageSize });
+        await updateMedication(tx, await findMedication(tx, await findUser(tx, values.user), name!), changes);
     });
-    console.log(`${mark} ${name}: package of ${packageSize}`);
+    const described = Object.entries(changes)
+        .filter(([, value]) => value !== undefined)
+        .map(([key, value]) => `${key} ${value === null ? 'removed' : value}`);
+    console.log(`${mark} ${name}: ${described.join(', ')}`);
     return 0;
 }
 

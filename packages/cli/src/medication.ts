@@ -1,5 +1,16 @@
 import { and, asc, desc, eq, lte } from 'drizzle-orm';
-import { dose, medication, organizer, user, type Db, type Medication, type Organizer, type Tx, type User } from '@med/db';
+import {
+    dose,
+    medication,
+    organizer,
+    user,
+    type Db,
+    type Medication,
+    type MedicationUnit,
+    type Organizer,
+    type Tx,
+    type User,
+} from '@med/db';
 
 /** The named user, or the only one when no name is given. */
 export async function findUser(db: Db | Tx, name: string | undefined): Promise<User> {
@@ -44,7 +55,7 @@ export async function listOrganizers(db: Db, owner: User): Promise<Organizer[]> 
 export async function addOrganizer(
     tx: Tx,
     owner: User,
-    values: { name: string; containers: number; containerDays: number },
+    values: { name: string; kind: 'slots' | 'open'; containers: number; containerDays: number },
 ): Promise<void> {
     const [existing] = await tx
         .select({ id: organizer.id })
@@ -66,7 +77,17 @@ export async function findMedication(db: Db | Tx, owner: User, name: string): Pr
 export async function addMedication(
     tx: Tx,
     owner: User,
-    values: { name: string; organizer: Organizer; perDay: string; packageSize: number; from: string },
+    values: {
+        name: string;
+        organizer: Organizer;
+        perDay: string;
+        packageSize: number;
+        from: string;
+        unit?: MedicationUnit;
+        openSize?: number;
+        usage?: string;
+        storage?: string;
+    },
 ): Promise<Medication> {
     const [existing] = await tx
         .select({ id: medication.id })
@@ -78,6 +99,10 @@ export async function addMedication(
         userId: owner.id,
         name: values.name,
         packageSize: values.packageSize,
+        unit: values.unit,
+        openSize: values.openSize,
+        usage: values.usage,
+        storage: values.storage,
     }).$returningId() as [{ id: number }];
     await tx
         .insert(dose)
@@ -85,10 +110,20 @@ export async function addMedication(
     return findMedication(tx, owner, values.name);
 }
 
-/** Change the default package size. */
-export async function updateMedication(tx: Tx, med: Medication, values: { packageSize?: number }): Promise<void> {
-    if (values.packageSize === undefined) throw new Error('Nothing to change, give --package-size');
-    await tx.update(medication).set(values).where(eq(medication.id, med.id));
+export interface MedicationChanges {
+    packageSize?: number;
+    unit?: MedicationUnit;
+    /** null removes it: opening one is then a whole package. */
+    openSize?: number | null;
+    usage?: string | null;
+    storage?: string | null;
+}
+
+/** Change a medication's package, unit or notes; values left out stay as they are. */
+export async function updateMedication(tx: Tx, med: Medication, values: MedicationChanges): Promise<void> {
+    const changes = Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined));
+    if (Object.keys(changes).length === 0) throw new Error('Nothing to change');
+    await tx.update(medication).set(changes).where(eq(medication.id, med.id));
 }
 
 /** Set the dose in one organizer from a date on; a row already starting that day is replaced. */
